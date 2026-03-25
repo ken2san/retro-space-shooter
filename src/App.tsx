@@ -22,13 +22,15 @@ const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
 const ENEMY_SPACING = 55;
 
-type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER';
+type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY';
 
 interface Bullet {
   x: number;
   y: number;
   vx?: number;
   vy?: number;
+  damage?: number;
+  size?: number;
 }
 
 interface Enemy {
@@ -55,6 +57,8 @@ interface Enemy {
   phase?: number;
   moveDir?: number;
   lastShotTime?: number;
+  isTurret?: boolean;
+  isFinalBoss?: boolean;
   // Entry path properties
   state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING';
   path?: { x: number, y: number }[];
@@ -117,6 +121,24 @@ interface PowerUp {
   life: number;
 }
 
+interface Scrap {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+}
+
+interface Asteroid {
+  x: number;
+  y: number;
+  size: number;
+  speed: number;
+  rotation: number;
+  vr: number;
+  hp: number;
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<GameState>('LOADING');
@@ -126,6 +148,9 @@ export default function App() {
   const [wave, setWave] = useState(1);
   const [sectorName, setSectorName] = useState('Outer Rim');
   const [distance, setDistance] = useState(25000);
+  const [scrapCount, setScrapCount] = useState(0);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [upgradeOptions, setUpgradeOptions] = useState<{id: string, label: string, desc: string}[]>([]);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
   const [isTouchDevice, setIsTouchDevice] = useState(false);
 
@@ -137,6 +162,9 @@ export default function App() {
   const bullets = useRef<Bullet[]>([]);
   const enemyBullets = useRef<Bullet[]>([]);
   const enemies = useRef<Enemy[]>([]);
+  const firepowerRef = useRef(1);
+  const speedRef = useRef(1);
+  const magnetRef = useRef(1);
   const particles = useRef<Particle[]>([]);
   const trails = useRef<Trail[]>([]);
   const shake = useRef(0);
@@ -165,6 +193,8 @@ export default function App() {
 
   // Warp Transition State
   const isWarping = useRef(false);
+  const scraps = useRef<Scrap[]>([]);
+  const asteroids = useRef<Asteroid[]>([]);
   const warpFactor = useRef(0);
   const warpStartTime = useRef(0);
 
@@ -240,6 +270,47 @@ export default function App() {
     return "The Core";
   };
 
+  const createExplosion = (x: number, y: number, color: string, count: number) => {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 10;
+      particles.current.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 30 + Math.random() * 30,
+        maxLife: 60,
+        color: color,
+        size: 2 + Math.random() * 4,
+        type: Math.random() > 0.5 ? 'square' : 'line',
+        rotation: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.2
+      });
+    }
+  };
+
+  const handlePlayerHit = () => {
+    if (Date.now() < invulnerableUntil.current) return;
+    
+    setLives(prev => {
+      const newLives = prev - 1;
+      livesRef.current = newLives;
+      if (newLives <= 0) {
+        setGameState('GAME_OVER');
+        audio.playGameOver();
+      } else {
+        audio.playPlayerHit();
+        invulnerableUntil.current = Date.now() + 2000;
+        flash.current = 1.0;
+        shake.current = 20;
+      }
+      return newLives;
+    });
+    
+    createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#00ffcc', 50);
+  };
+
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
@@ -260,16 +331,18 @@ export default function App() {
     });
 
     if (isBossWave) {
-      const bossHealthVal = 1000 + (waveNum / 5) * 500;
+      const isFinalBoss = waveNum >= 25;
+      const bossHealthVal = (1000 + (waveNum / 5) * 500) * (isFinalBoss ? 2 : 1);
       const bossPath = [
         { x: CANVAS_WIDTH / 2, y: -200 },
         { x: CANVAS_WIDTH / 2, y: 80 }
       ];
       newEnemies.push({
-        ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 0, 0, bossPath),
-        width: 120,
-        height: 100,
+        ...createEnemy(CANVAS_WIDTH / 2 - (isFinalBoss ? 90 : 60), 80, 0, 0, bossPath),
+        width: isFinalBoss ? 180 : 120,
+        height: isFinalBoss ? 150 : 100,
         isBoss: true,
+        isFinalBoss,
         health: bossHealthVal,
         maxHealth: bossHealthVal,
         phase: 1,
@@ -381,7 +454,52 @@ export default function App() {
         }
       }
     }
+    
+    // Add turrets for Fortress Gates
+    if (waveNum > 15) {
+      for (let i = 0; i < 4; i++) {
+        const x = (i + 1) * (CANVAS_WIDTH / 5) - 20;
+        const y = 60;
+        const turret = createEnemy(x, y, 2, 0); 
+        turret.isTurret = true;
+        turret.health = 100;
+        turret.maxHealth = 100;
+        turret.state = 'IN_FORMATION';
+        turret.width = 40;
+        turret.height = 40;
+        newEnemies.push(turret);
+      }
+    }
+
     enemies.current = newEnemies;
+  };
+
+  const handleUpgrade = (id: string) => {
+    if (id === 'firepower') {
+      firepowerRef.current += 1;
+    } else if (id === 'speed') {
+      speedRef.current += 1;
+    } else if (id === 'shield') {
+      setLives(prev => Math.min(5, prev + 1));
+      livesRef.current = Math.min(5, livesRef.current + 1);
+    } else if (id === 'magnet') {
+      magnetRef.current += 1;
+    }
+    
+    setShowUpgrade(false);
+    
+    waveRef.current += 1;
+    setWave(waveRef.current);
+    setSectorName(getSectorName(waveRef.current));
+    setDistance(prev => Math.max(0, prev - 1000));
+    initEnemies(waveRef.current);
+    
+    setWaveTitle(true);
+    setTimeout(() => setWaveTitle(false), 2000);
+    
+    setTimeout(() => {
+      isWarping.current = false;
+    }, 1000);
   };
 
   const startGame = () => {
@@ -392,6 +510,11 @@ export default function App() {
     setWave(1);
     setSectorName('Outer Rim');
     setDistance(25000);
+    setScrapCount(0);
+    setShowUpgrade(false);
+    firepowerRef.current = 1;
+    speedRef.current = 1;
+    magnetRef.current = 1;
     livesRef.current = 3;
     waveRef.current = 1;
     invulnerableUntil.current = 0;
@@ -400,6 +523,8 @@ export default function App() {
     enemyBullets.current = [];
     particles.current = [];
     trails.current = [];
+    scraps.current = [];
+    asteroids.current = [];
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
@@ -434,7 +559,8 @@ export default function App() {
 
     // Player movement
     let isMoving = false;
-    const currentSpeed = isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED;
+    const speedMultiplier = 1 + (speedRef.current - 1) * 0.15;
+    const currentSpeed = (isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
 
     if ((keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA'] || keysPressed.current['TouchLeft']) && playerPos.current.x > 0) {
       playerPos.current.x -= currentSpeed;
@@ -485,6 +611,77 @@ export default function App() {
     });
     powerUps.current = powerUps.current.filter(p => p.y < CANVAS_HEIGHT && p.life > 0);
 
+    // Update Scraps
+    scraps.current.forEach(s => {
+      const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - s.x;
+      const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - s.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      const magnetRange = 150 + (magnetRef.current - 1) * 60;
+      if (dist < magnetRange) {
+        // Magnet effect
+        const pullStrength = 0.5 + (magnetRef.current - 1) * 0.2;
+        s.vx += (dx / dist) * pullStrength;
+        s.vy += (dy / dist) * pullStrength;
+      }
+      
+      s.x += s.vx;
+      s.y += s.vy;
+      s.vx *= 0.95;
+      s.vy *= 0.95;
+      s.y += 1; // Drift down
+      
+      if (dist < 30) {
+        setScrapCount(prev => prev + 1);
+        s.life = 0;
+        setScore(prev => prev + 10);
+      }
+    });
+    scraps.current = scraps.current.filter(s => s.y < CANVAS_HEIGHT && s.life > 0);
+
+    // Update Asteroids (Sector 6-10: Asteroid Belt)
+    if (sectorName === 'Asteroid Belt' && !isWarping.current && Math.random() < 0.02) {
+      asteroids.current.push({
+        x: Math.random() * CANVAS_WIDTH,
+        y: -100,
+        size: Math.random() * 40 + 20,
+        speed: Math.random() * 2 + 1,
+        rotation: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 0.05,
+        hp: 3
+      });
+    }
+    
+    asteroids.current.forEach(a => {
+      a.y += a.speed;
+      a.rotation += a.vr;
+      
+      // Collision with player
+      const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - a.x;
+      const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < a.size * 0.8 && Date.now() > invulnerableUntil.current) {
+        handlePlayerHit();
+        a.hp = 0; // Destroy asteroid
+      }
+      
+      // Collision with bullets
+      bullets.current.forEach(b => {
+        const bdx = b.x - a.x;
+        const bdy = b.y - a.y;
+        const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+        if (bdist < a.size) {
+          a.hp -= (b.damage || 1);
+          b.y = -100; // Remove bullet
+          if (a.hp <= 0) {
+            createExplosion(a.x, a.y, '#888888', 10);
+            setScore(s => s + 50);
+          }
+        }
+      });
+    });
+    asteroids.current = asteroids.current.filter(a => a.y < CANVAS_HEIGHT + 100 && a.hp > 0);
+
     // Overdrive Logic
     if (isOverdriveActive.current) {
       if (Date.now() > overdriveEndTime.current) {
@@ -522,25 +719,31 @@ export default function App() {
       if (now - lastShotTime.current > shootInterval) {
         const isMulti = activeEffects.current['MULTISHOT'] > Date.now();
         const isOver = isOverdriveActive.current;
+        const bulletDamage = 1 + (firepowerRef.current - 1) * 0.5;
+        const bulletSize = 4 + (firepowerRef.current - 1) * 2;
 
         if (isOver) {
           // Super Overdrive Shot
           for (let i = -2; i <= 2; i++) {
             bullets.current.push({
-              x: playerPos.current.x + PLAYER_WIDTH / 2 - 2 + i * 15,
+              x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2 + i * 15,
               y: playerPos.current.y,
               vx: i * 0.5,
-              vy: -BULLET_SPEED * 1.5
+              vy: -BULLET_SPEED * 1.5,
+              damage: bulletDamage * 2,
+              size: bulletSize * 1.5
             });
           }
         } else if (isMulti) {
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y });
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y });
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10 });
+          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
+          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
+          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10, damage: bulletDamage, size: bulletSize });
         } else {
           bullets.current.push({
-            x: playerPos.current.x + PLAYER_WIDTH / 2 - 2,
+            x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2,
             y: playerPos.current.y,
+            damage: bulletDamage,
+            size: bulletSize
           });
         }
         audio.playShoot();
@@ -684,6 +887,29 @@ export default function App() {
               }
             }
           }
+        }
+        return;
+      }
+
+      if (enemy.isTurret) {
+        // Turret Logic
+        const now = Date.now();
+        const shootInterval = 2000 - Math.min(1000, waveRef.current * 50);
+        if (now - (enemy.lastShotTime || 0) > shootInterval) {
+          enemy.lastShotTime = now;
+          audio.playEnemyShoot();
+          
+          // Target player
+          const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
+          const dy = playerPos.current.y - (enemy.y + enemy.height / 2);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          enemyBullets.current.push({
+            x: enemy.x + enemy.width / 2,
+            y: enemy.y + enemy.height / 2,
+            vx: (dx / dist) * 3,
+            vy: (dy / dist) * 3
+          });
         }
         return;
       }
@@ -836,7 +1062,7 @@ export default function App() {
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
           
           if (enemy.isBoss) {
-            enemy.health! -= 10;
+            enemy.health! -= (bullet.damage || 1) * 10;
             setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
             bullets.current.splice(bIdx, 1);
             audio.playEnemyHit();
@@ -846,6 +1072,24 @@ export default function App() {
               enemy.alive = false;
               setBossHealth(null);
               setScore(s => s + 5000 * (waveRef.current / 5));
+              
+              if (enemy.isFinalBoss) {
+                setGameState('VICTORY');
+              }
+              
+              audio.playExplosion();
+              createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff33cc', 100);
+              
+              // Drop many scraps
+              for (let i = 0; i < 20; i++) {
+                scraps.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height / 2,
+                  vx: (Math.random() - 0.5) * 10,
+                  vy: (Math.random() - 0.5) * 10,
+                  life: 1
+                });
+              }
               
               // Overdrive gauge increase
               if (!isOverdriveActive.current) {
@@ -878,6 +1122,17 @@ export default function App() {
 
           enemy.alive = false;
           bullets.current.splice(bIdx, 1);
+          
+          // Drop scrap
+          if (Math.random() < 0.6) {
+            scraps.current.push({
+              x: enemy.x + enemy.width / 2,
+              y: enemy.y + enemy.height / 2,
+              vx: (Math.random() - 0.5) * 4,
+              vy: (Math.random() - 0.5) * 4,
+              life: 1
+            });
+          }
           
           // Combo system
           const now = Date.now();
@@ -1031,7 +1286,7 @@ export default function App() {
     particles.current = particles.current.filter(p => p.life > 0);
 
     const aliveEnemies = enemies.current.filter(e => e.alive);
-    if (aliveEnemies.length === 0 && !isWarping.current) {
+    if (aliveEnemies.length === 0 && !isWarping.current && !showUpgrade) {
       isWarping.current = true;
       warpStartTime.current = Date.now();
       audio.playWaveClear();
@@ -1040,22 +1295,20 @@ export default function App() {
       // Clear bullets
       bullets.current = [];
       enemyBullets.current = [];
+      asteroids.current = [];
 
       setTimeout(() => {
-        waveRef.current += 1;
-        setWave(waveRef.current);
-        setSectorName(getSectorName(waveRef.current));
-        setDistance(prev => Math.max(0, prev - 1000));
-        initEnemies(waveRef.current);
-        
-        // Wave title effect
-        setWaveTitle(true);
-        setTimeout(() => setWaveTitle(false), 2000);
-        
-        // End warp after a bit more time
-        setTimeout(() => {
-          isWarping.current = false;
-        }, 1000);
+        // Show Upgrade Choice
+        const options = [
+          { id: 'firepower', label: 'Enhanced Plasma', desc: 'Increase bullet size and damage' },
+          { id: 'speed', label: 'Overclocked Thrusters', desc: 'Permanent movement speed boost' },
+          { id: 'shield', label: 'Nano-Repair', desc: 'Restore 1 life or gain temporary shield' },
+          { id: 'magnet', label: 'Scrap Magnet', desc: 'Increase scrap collection range' }
+        ];
+        // Pick 2 random
+        const shuffled = options.sort(() => 0.5 - Math.random());
+        setUpgradeOptions(shuffled.slice(0, 2));
+        setShowUpgrade(true);
       }, 1500);
     }
 
@@ -1151,7 +1404,7 @@ export default function App() {
       ctx.stroke();
     }
 
-    // Trails
+    // Draw Trails
     trails.current.forEach(t => {
       ctx.globalAlpha = (t.life / t.maxLife) * 0.4;
       ctx.fillStyle = t.color;
@@ -1160,6 +1413,40 @@ export default function App() {
       ctx.fill();
     });
     ctx.globalAlpha = 1.0;
+
+    // Draw Asteroids
+    asteroids.current.forEach(a => {
+      ctx.save();
+      ctx.translate(a.x, a.y);
+      ctx.rotate(a.rotation);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#555';
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const r = a.size * (0.8 + Math.random() * 0.4);
+        if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // Draw Scraps
+    scraps.current.forEach(s => {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#00ffcc';
+      ctx.fillStyle = '#00ffcc';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
 
     // Power-ups
     powerUps.current.forEach(p => {
@@ -1259,9 +1546,10 @@ export default function App() {
     // Bullets
     ctx.shadowBlur = 15;
     bullets.current.forEach((b) => {
+      const size = b.size || 4;
       ctx.fillStyle = isOverdriveActive.current ? '#ff3366' : '#00ffcc';
       ctx.shadowColor = isOverdriveActive.current ? '#ff3366' : '#00ffcc';
-      ctx.fillRect(b.x, b.y, 4, isOverdriveActive.current ? 20 : 12);
+      ctx.fillRect(b.x, b.y, size, isOverdriveActive.current ? size * 5 : size * 3);
     });
     
     // Enemy Bullets
@@ -1291,6 +1579,15 @@ export default function App() {
         ctx.lineWidth = 4;
 
         // Main Body (Large Hexagon-like)
+        if (enemy.isFinalBoss) {
+          ctx.strokeStyle = '#00ffcc';
+          ctx.shadowColor = '#00ffcc';
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(0, 0, 70 + pulse, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = color; // Reset for main body
+        }
         ctx.beginPath();
         ctx.moveTo(0, -enemy.height / 2);
         ctx.lineTo(enemy.width / 2, -enemy.height / 4);
@@ -1320,6 +1617,35 @@ export default function App() {
           ctx.stroke();
         }
 
+        ctx.restore();
+        return;
+      }
+
+      if (enemy.isTurret) {
+        // Turret Rendering (Octagon Defense)
+        const color = '#ffcc00';
+        ctx.strokeStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 15;
+        ctx.lineWidth = 3;
+        
+        ctx.beginPath();
+        for(let i=0; i<8; i++) {
+          const a = (i * Math.PI * 2) / 8;
+          const x = Math.cos(a) * enemy.width/2;
+          const y = Math.sin(a) * enemy.height/2;
+          if(i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        
+        // Rotating Core
+        ctx.save();
+        ctx.rotate(Date.now() / 500);
+        ctx.strokeRect(-8, -8, 16, 16);
+        ctx.restore();
+        
         ctx.restore();
         return;
       }
@@ -1437,6 +1763,39 @@ export default function App() {
     ctx.globalAlpha = 1.0;
 
     ctx.restore(); // Restore from shake
+
+    // Nebula Pass Effect
+    if (sectorName === 'Nebula Pass') {
+      ctx.save();
+      const time = Date.now() / 2000;
+      const nebulaGradient = ctx.createRadialGradient(
+        CANVAS_WIDTH / 2 + Math.sin(time) * 100,
+        CANVAS_HEIGHT / 2 + Math.cos(time) * 100,
+        0,
+        CANVAS_WIDTH / 2,
+        CANVAS_HEIGHT / 2,
+        CANVAS_WIDTH
+      );
+      nebulaGradient.addColorStop(0, 'rgba(100, 0, 255, 0.1)');
+      nebulaGradient.addColorStop(0.5, 'rgba(50, 0, 100, 0.05)');
+      nebulaGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      ctx.fillStyle = nebulaGradient;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      
+      // Add some "static" noise
+      ctx.globalAlpha = 0.03;
+      for (let i = 0; i < 5; i++) {
+        const x = Math.random() * CANVAS_WIDTH;
+        const y = Math.random() * CANVAS_HEIGHT;
+        const w = Math.random() * 200 + 100;
+        const h = Math.random() * 50 + 20;
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(x, y, w, h);
+      }
+      ctx.globalAlpha = 1.0;
+      ctx.restore();
+    }
 
     // Flash
     if (flash.current > 0) {
@@ -1598,6 +1957,13 @@ export default function App() {
           <span className="text-xl font-bold text-[#ff33cc] tracking-tighter">{wave}</span>
         </div>
         <div className="flex flex-col items-center">
+          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Scrap</span>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-[#00ffcc] rounded-full animate-pulse" />
+            <span className="text-xl font-bold text-[#00ffcc] tracking-tighter">{scrapCount}</span>
+          </div>
+        </div>
+        <div className="flex flex-col items-center">
           <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Lives</span>
           <div className="flex gap-2 h-6">
             {[...Array(Math.max(0, lives))].map((_, i) => (
@@ -1660,6 +2026,42 @@ export default function App() {
 
         {/* Overlay Screens */}
         <AnimatePresence>
+          {showUpgrade && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-8"
+            >
+              <motion.div 
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                className="text-center mb-12"
+              >
+                <h3 className="text-[#00ffcc] text-xs uppercase tracking-[0.5em] mb-2">Sector Cleared</h3>
+                <h2 className="text-4xl font-black italic tracking-tighter">CHOOSE ENHANCEMENT</h2>
+              </motion.div>
+              
+              <div className="grid grid-cols-1 gap-4 w-full max-w-xs">
+                {upgradeOptions.map((opt) => (
+                  <motion.button
+                    key={opt.id}
+                    whileHover={{ scale: 1.05, backgroundColor: 'rgba(0, 255, 204, 0.1)' }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => handleUpgrade(opt.id)}
+                    className="flex flex-col items-start p-4 border border-[#00ffcc]/30 bg-black/50 rounded-lg text-left transition-colors hover:border-[#00ffcc]"
+                  >
+                    <span className="text-[#00ffcc] font-bold uppercase tracking-widest text-sm mb-1">{opt.label}</span>
+                    <span className="text-gray-400 text-[10px] leading-tight">{opt.desc}</span>
+                  </motion.button>
+                ))}
+              </div>
+              
+              <div className="mt-12 text-[8px] text-gray-600 uppercase tracking-[0.3em]">
+                System Scavenging Complete
+              </div>
+            </motion.div>
+          )}
+
           {waveTitle && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8, rotateX: 45 }}
@@ -1776,6 +2178,44 @@ export default function App() {
                   <span>{isTouchDevice ? 'Auto-Fire' : 'Space Bar'}</span>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {gameState === 'VICTORY' && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-50 p-8 text-center"
+            >
+              <motion.div
+                animate={{ 
+                  textShadow: ["0 0 20px #00ffcc", "0 0 40px #00ffcc", "0 0 20px #00ffcc"],
+                  scale: [1, 1.1, 1]
+                }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="text-6xl font-bold text-[#00ffcc] mb-4 tracking-widest"
+              >
+                MISSION COMPLETE
+              </motion.div>
+              <div className="text-2xl text-white mb-8">
+                The Core has been neutralized. The galaxy is safe.
+              </div>
+              <div className="bg-[#00ffcc]/10 border border-[#00ffcc]/30 p-6 rounded-xl mb-8 w-full max-w-md">
+                <div className="flex justify-between mb-2">
+                  <span className="text-[#00ffcc]/70">FINAL SCORE</span>
+                  <span className="text-2xl font-bold text-white">{score}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#00ffcc]/70">SECTORS CLEARED</span>
+                  <span className="text-2xl font-bold text-white">{waveRef.current}</span>
+                </div>
+              </div>
+              <button
+                onClick={startGame}
+                className="px-12 py-4 bg-transparent border-2 border-[#00ffcc] text-[#00ffcc] rounded-full text-xl font-bold hover:bg-[#00ffcc] hover:text-black transition-all shadow-[0_0_20px_rgba(0,255,204,0.3)]"
+              >
+                NEW MISSION
+              </button>
             </motion.div>
           )}
 

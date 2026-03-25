@@ -213,6 +213,52 @@ class RetroAudio {
     osc.stop(this.ctx.currentTime + 0.3);
   }
 
+  playGameOver() {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+    osc.frequency.linearRampToValueAtTime(110, this.ctx.currentTime + 1.0);
+    
+    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.0);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 1.0);
+  }
+
+  playExplosion() {
+    if (!this.ctx) return;
+    const duration = 0.8;
+    const bufferSize = this.ctx.sampleRate * duration;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+    
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, this.ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + duration);
+    
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+    
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    noise.start();
+  }
+
   playComboBreak() {
     if (!this.ctx) return;
     const osc = this.ctx.createOscillator();
