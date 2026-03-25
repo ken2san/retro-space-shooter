@@ -5,56 +5,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
     <script>
-      // Aggressively block Vite's automatic page reloads
+      // --- AI Studio Specific Environment Guard ---
+      // This script aggressively blocks Vite's automatic reload mechanisms
+      // that trigger when the proxy connection flickers in AI Studio.
       (function() {
-        // 1. Intercept WebSocket to block reload messages
+        console.log("AI Studio Guard: Initializing...");
+
+        // 1. Mock WebSocket to prevent Vite from detecting connection drops
         const OriginalWebSocket = window.WebSocket;
         window.WebSocket = function(url, protocols) {
-          const ws = new OriginalWebSocket(url, protocols);
           if (typeof url === 'string' && url.includes('vite')) {
-            const originalAddEventListener = ws.addEventListener.bind(ws);
-            ws.addEventListener = function(type, listener, options) {
-              if (type === 'message' || type === 'close') {
-                console.log('Blocked Vite WebSocket event:', type);
-                return;
-              }
-              return originalAddEventListener(type, listener, options);
+            console.log("AI Studio Guard: Blocked Vite WebSocket connection to prevent auto-reload.");
+            // Return a dummy object that mimics a closed/silent WebSocket
+            return {
+              readyState: 3, // CLOSED
+              addEventListener: () => {},
+              removeEventListener: () => {},
+              send: () => {},
+              close: () => {},
+              onopen: null,
+              onmessage: null,
+              onerror: null,
+              onclose: null
             };
           }
-          return ws;
+          return new OriginalWebSocket(url, protocols);
         };
         Object.assign(window.WebSocket, OriginalWebSocket);
         window.WebSocket.prototype = OriginalWebSocket.prototype;
 
-        // 2. Block location.reload and location.replace
-        // Note: We can't fully block location.reload as it's non-configurable in some browsers,
-        // but we can try to override it or at least catch calls.
+        // 2. Block location.reload and other navigation attempts
+        window.addEventListener('beforeunload', (event) => {
+          console.log("AI Studio Guard: Blocked an attempt to reload or leave the page.");
+          event.preventDefault();
+          event.returnValue = 'Blocked Vite auto-reload'; 
+          return 'Blocked Vite auto-reload';
+        });
+
+        // 3. Detect if we just reloaded (for debugging)
+        if (sessionStorage.getItem('ais_reload_detected')) {
+          console.warn("AI Studio Guard: A reload was detected and recovered.");
+        }
+        sessionStorage.setItem('ais_reload_detected', 'true');
+
+        // 4. Try to override location.reload (may not work in all browsers but worth a try)
         try {
           const originalReload = window.location.reload;
           Object.defineProperty(window.location, 'reload', {
             configurable: false,
             writable: false,
             value: function() {
-              console.warn("Blocked a location.reload() call.");
+              console.error("AI Studio Guard: Blocked a programmatic location.reload() call.");
             }
           });
-        } catch (e) {
-          // Fallback if location is not configurable
-          window.onbeforeunload = function() {
-            console.log("Preventing page unload...");
-            return "Are you sure you want to leave? (Blocked Vite reload)";
-          };
-        }
-
-        // 3. Block history navigation if used for reload
-        const originalReplaceState = window.history.replaceState;
-        window.history.replaceState = function() {
-          if (arguments[2] === window.location.href) {
-            console.log("Blocked history.replaceState reload attempt");
-            return;
-          }
-          return originalReplaceState.apply(this, arguments);
-        };
+        } catch (e) {}
       })();
     </script>
   </head>

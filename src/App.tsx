@@ -49,6 +49,12 @@ interface Enemy {
   diveTime?: number;
   diveStartX?: number;
   diveStartY?: number;
+  isBoss?: boolean;
+  health?: number;
+  maxHealth?: number;
+  phase?: number;
+  moveDir?: number;
+  lastShotTime?: number;
 }
 
 interface Particle {
@@ -74,6 +80,29 @@ interface Trail {
   width: number;
 }
 
+const NeonShip = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="glow">
+        <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+        <feMerge>
+          <feMergeNode in="coloredBlur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+    {/* Wings */}
+    <path d="M50 20 L85 75 L50 65 L15 75 Z" stroke="#00ffcc" strokeWidth="3" filter="url(#glow)" strokeLinejoin="round" />
+    {/* Cockpit */}
+    <path d="M50 35 L65 60 L50 55 L35 60 Z" stroke="#33ccff" strokeWidth="2" filter="url(#glow)" strokeLinejoin="round" />
+    {/* Engine Glow */}
+    <circle cx="50" cy="70" r="8" fill="#ff3366" filter="url(#glow)" opacity="0.6">
+      <animate attributeName="r" values="6;10;6" dur="0.2s" repeatCount="indefinite" />
+      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="0.2s" repeatCount="indefinite" />
+    </circle>
+  </svg>
+);
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<GameState>('LOADING');
@@ -82,6 +111,7 @@ export default function App() {
   const [lives, setLives] = useState(3);
   const [wave, setWave] = useState(1);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   // Game state refs for the loop
   const livesRef = useRef(3);
@@ -99,11 +129,38 @@ export default function App() {
   const lastShotTime = useRef(0);
   const lastDiveTime = useRef(0);
   const requestRef = useRef<number>(null);
-  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const comboRef = useRef(0);
+  const lastHitTime = useRef(0);
+  const stars = useRef<{x: number, y: number, size: number, speed: number, opacity: number}[]>([]);
+  const [combo, setCombo] = useState(0);
+  const [waveTitle, setWaveTitle] = useState(false);
+  const [bossHealth, setBossHealth] = useState<{current: number, max: number} | null>(null);
 
-  // Detect touch device
+  // Initialize stars
   useEffect(() => {
-    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    stars.current = Array.from({ length: 100 }, () => ({
+      x: Math.random() * CANVAS_WIDTH,
+      y: Math.random() * CANVAS_HEIGHT,
+      size: Math.random() * 2 + 1,
+      speed: Math.random() * 2 + 0.5,
+      opacity: Math.random() * 0.5 + 0.2
+    }));
+  }, []);
+
+  // Detect touch device and handle resize
+  useEffect(() => {
+    const checkTouch = () => {
+      const hasTouch = (
+        'ontouchstart' in window ||
+        navigator.maxTouchPoints > 0 ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+      );
+      setIsTouchDevice(hasTouch);
+    };
+
+    checkTouch();
+    window.addEventListener('resize', checkTouch);
+    return () => window.removeEventListener('resize', checkTouch);
   }, []);
 
   // Load assets on mount
@@ -140,7 +197,8 @@ export default function App() {
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
-    const formationType = waveNum % 4; // 1, 2, 3, 0
+    const isBossWave = waveNum % 5 === 0;
+    const formationType = isBossWave ? 'BOSS' : waveNum % 4; // 1, 2, 3, 0
     
     const createEnemy = (x: number, y: number, type: number): Enemy => ({
       x, y, width: 35, height: 35, alive: true, type,
@@ -149,57 +207,83 @@ export default function App() {
       diveTime: 0, diveStartX: 0, diveStartY: 0
     });
 
-    if (formationType === 1) {
-      // Grid
-      for (let row = 0; row < ENEMY_ROWS; row++) {
-        for (let col = 0; col < ENEMY_COLS; col++) {
-          const x = col * ENEMY_SPACING + 80;
-          const y = row * ENEMY_SPACING + 60;
-          newEnemies.push(createEnemy(x, y, row % 3));
-        }
-      }
-    } else if (formationType === 2) {
-      // V-shape
-      for (let row = 0; row < 5; row++) {
-        for (let col = 0; col < 9; col++) {
-          if (row === Math.abs(col - 4)) {
-            const x = col * ENEMY_SPACING + 60;
-            const y = row * ENEMY_SPACING + 60;
-            newEnemies.push(createEnemy(x, y, 1));
-          }
-          if (row > 1 && row - 1 === Math.abs(col - 4)) {
-            const x = col * ENEMY_SPACING + 60;
-            const y = row * ENEMY_SPACING + 60;
-            newEnemies.push(createEnemy(x, y, 2));
-          }
-        }
-      }
-    } else if (formationType === 3) {
-      // Circle
-      const centerX = CANVAS_WIDTH / 2;
-      const centerY = 150;
-      const radiusX = 200;
-      const radiusY = 100;
-      for (let i = 0; i < 20; i++) {
-        const angle = (i / 20) * Math.PI * 2;
-        const x = centerX + Math.cos(angle) * radiusX - 17.5;
-        const y = centerY + Math.sin(angle) * radiusY - 17.5;
-        newEnemies.push(createEnemy(x, y, i % 3));
-      }
-      for (let i = 0; i < 10; i++) {
-        const angle = (i / 10) * Math.PI * 2;
-        const x = centerX + Math.cos(angle) * (radiusX / 2) - 17.5;
-        const y = centerY + Math.sin(angle) * (radiusY / 2) - 17.5;
-        newEnemies.push(createEnemy(x, y, 0));
-      }
+    if (isBossWave) {
+      const bossHealthVal = 1000 + (waveNum / 5) * 500;
+      newEnemies.push({
+        x: CANVAS_WIDTH / 2 - 60,
+        y: -150,
+        width: 120,
+        height: 100,
+        alive: true,
+        type: 0,
+        isDiving: false,
+        isReturning: false,
+        diveX: 0,
+        diveY: 0,
+        originX: CANVAS_WIDTH / 2 - 60,
+        originY: 80,
+        isBoss: true,
+        health: bossHealthVal,
+        maxHealth: bossHealthVal,
+        phase: 1,
+        moveDir: 1,
+        lastShotTime: 0
+      });
+      setBossHealth({ current: bossHealthVal, max: bossHealthVal });
     } else {
-      // Checkerboard / U-Shape
-      for (let row = 0; row < 5; row++) {
-        for (let col = 0; col < 9; col++) {
-          if ((row + col) % 2 === 0) {
-            const x = col * ENEMY_SPACING + 60;
+      setBossHealth(null);
+      if (formationType === 1) {
+        // Grid
+        for (let row = 0; row < ENEMY_ROWS; row++) {
+          for (let col = 0; col < ENEMY_COLS; col++) {
+            const x = col * ENEMY_SPACING + 80;
             const y = row * ENEMY_SPACING + 60;
             newEnemies.push(createEnemy(x, y, row % 3));
+          }
+        }
+      } else if (formationType === 2) {
+        // V-shape
+        for (let row = 0; row < 5; row++) {
+          for (let col = 0; col < 9; col++) {
+            if (row === Math.abs(col - 4)) {
+              const x = col * ENEMY_SPACING + 60;
+              const y = row * ENEMY_SPACING + 60;
+              newEnemies.push(createEnemy(x, y, 1));
+            }
+            if (row > 1 && row - 1 === Math.abs(col - 4)) {
+              const x = col * ENEMY_SPACING + 60;
+              const y = row * ENEMY_SPACING + 60;
+              newEnemies.push(createEnemy(x, y, 2));
+            }
+          }
+        }
+      } else if (formationType === 3) {
+        // Circle
+        const centerX = CANVAS_WIDTH / 2;
+        const centerY = 150;
+        const radiusX = 200;
+        const radiusY = 100;
+        for (let i = 0; i < 20; i++) {
+          const angle = (i / 20) * Math.PI * 2;
+          const x = centerX + Math.cos(angle) * radiusX - 17.5;
+          const y = centerY + Math.sin(angle) * radiusY - 17.5;
+          newEnemies.push(createEnemy(x, y, i % 3));
+        }
+        for (let i = 0; i < 10; i++) {
+          const angle = (i / 10) * Math.PI * 2;
+          const x = centerX + Math.cos(angle) * (radiusX / 2) - 17.5;
+          const y = centerY + Math.sin(angle) * (radiusY / 2) - 17.5;
+          newEnemies.push(createEnemy(x, y, 0));
+        }
+      } else {
+        // Checkerboard / U-Shape
+        for (let row = 0; row < 5; row++) {
+          for (let col = 0; col < 9; col++) {
+            if ((row + col) % 2 === 0) {
+              const x = col * ENEMY_SPACING + 60;
+              const y = row * ENEMY_SPACING + 60;
+              newEnemies.push(createEnemy(x, y, row % 3));
+            }
           }
         }
       }
@@ -347,6 +431,68 @@ export default function App() {
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
 
+      if (enemy.isBoss) {
+        // Boss Logic
+        if (enemy.y < enemy.originY) {
+          enemy.y += 1; // Entry
+        } else {
+          // Horizontal movement
+          enemy.x += (enemy.moveDir || 1) * 1.5;
+          if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
+            enemy.moveDir = (enemy.moveDir || 1) * -1;
+          }
+
+          // Phase logic
+          if (enemy.health! < enemy.maxHealth! * 0.3) enemy.phase = 3;
+          else if (enemy.health! < enemy.maxHealth! * 0.6) enemy.phase = 2;
+
+          // Boss shooting
+          const now = Date.now();
+          const shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
+          if (now - (enemy.lastShotTime || 0) > shootInterval) {
+            enemy.lastShotTime = now;
+            audio.playEnemyShoot();
+
+            if (enemy.phase === 1) {
+              // Spread shot
+              for (let i = -2; i <= 2; i++) {
+                enemyBullets.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height,
+                  vx: i * 0.8,
+                  vy: 3
+                });
+              }
+            } else if (enemy.phase === 2) {
+              // Targeted + Spread
+              const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
+              const dy = playerPos.current.y - (enemy.y + enemy.height);
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              for (let i = -1; i <= 1; i++) {
+                enemyBullets.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height,
+                  vx: (dx / dist) * 3 + i * 0.5,
+                  vy: (dy / dist) * 3
+                });
+              }
+            } else {
+              // Circle burst
+              for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2;
+                enemyBullets.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height / 2,
+                  vx: Math.cos(angle) * 3,
+                  vy: Math.sin(angle) * 3
+                });
+              }
+            }
+          }
+        }
+        return;
+      }
+
       enemy.originY += 0.01 + (waveRef.current * 0.002);
 
       if (!enemy.isDiving && !enemy.isReturning) {
@@ -487,9 +633,59 @@ export default function App() {
         if (enemy.alive &&
             bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
+          
+          if (enemy.isBoss) {
+            enemy.health! -= 10;
+            setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
+            bullets.current.splice(bIdx, 1);
+            audio.playEnemyHit();
+            flash.current = 0.2;
+            
+            if (enemy.health! <= 0) {
+              enemy.alive = false;
+              setBossHealth(null);
+              setScore(s => s + 5000 * (waveRef.current / 5));
+              
+              // Big explosion
+              for(let i=0; i<100; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 12;
+                particles.current.push({
+                  x: enemy.x + enemy.width/2,
+                  y: enemy.y + enemy.height/2,
+                  vx: Math.cos(angle) * speed,
+                  vy: Math.sin(angle) * speed,
+                  life: 40 + Math.random() * 40,
+                  maxLife: 80,
+                  color: i % 2 === 0 ? '#ff3366' : '#ffffff',
+                  size: 4 + Math.random() * 6,
+                  type: 'square',
+                  rotation: Math.random() * Math.PI,
+                  vr: (Math.random() - 0.5) * 0.2
+                });
+              }
+              shake.current = 30;
+            }
+            return;
+          }
+
           enemy.alive = false;
           bullets.current.splice(bIdx, 1);
-          setScore((s) => s + (enemy.isDiving ? 250 : 100));
+          
+          // Combo system
+          const now = Date.now();
+          if (now - lastHitTime.current < 1000) {
+            comboRef.current += 1;
+          } else {
+            comboRef.current = 1;
+          }
+          lastHitTime.current = now;
+          setCombo(comboRef.current);
+
+          const basePoints = enemy.isDiving ? 250 : 100;
+          const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.1);
+          setScore((s) => s + basePoints + comboBonus);
+          
           audio.playEnemyHit();
           shake.current = Math.max(shake.current, 5);
           
@@ -597,6 +793,11 @@ export default function App() {
       waveRef.current += 1;
       setWave(waveRef.current);
       initEnemies(waveRef.current);
+      
+      // Wave title effect
+      const isBossWave = waveRef.current % 5 === 0;
+      setWaveTitle(true);
+      setTimeout(() => setWaveTitle(false), 2000);
     }
 
     if (aliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && !e.isDiving && !e.isReturning)) {
@@ -605,26 +806,50 @@ export default function App() {
   };
 
   const draw = (ctx: CanvasRenderingContext2D) => {
-    ctx.fillStyle = '#020205';
+    // Clear with slight trail effect
+    ctx.fillStyle = 'rgba(2, 2, 5, 0.3)';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     ctx.save();
+    
+    // Apply screen shake
     if (shake.current > 0) {
       const dx = (Math.random() - 0.5) * shake.current;
       const dy = (Math.random() - 0.5) * shake.current;
       ctx.translate(dx, dy);
+      shake.current *= 0.9;
     }
 
-    // Starfield
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < 60; i++) {
-      const x = (Math.sin(i * 1234.5) * 0.5 + 0.5) * CANVAS_WIDTH;
-      const y = ((Math.cos(i * 5432.1) * 0.5 + 0.5) * CANVAS_HEIGHT + Date.now() / 15) % CANVAS_HEIGHT;
-      const size = i % 3 === 0 ? 2 : 1;
-      ctx.globalAlpha = i % 2 === 0 ? 0.8 : 0.4;
-      ctx.fillRect(x, y, size, size);
+    // Parallax Starfield
+    stars.current.forEach(s => {
+      s.y += s.speed;
+      if (s.y > CANVAS_HEIGHT) {
+        s.y = -10;
+        s.x = Math.random() * CANVAS_WIDTH;
+      }
+      ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Grid (Perspective effect)
+    ctx.strokeStyle = 'rgba(0, 255, 204, 0.05)';
+    ctx.lineWidth = 1;
+    const gridSpacing = 40;
+    const gridOffset = (Date.now() / 20) % gridSpacing;
+    for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, CANVAS_HEIGHT);
+      ctx.stroke();
     }
-    ctx.globalAlpha = 1.0;
+    for (let y = gridOffset; y <= CANVAS_HEIGHT; y += gridSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(CANVAS_WIDTH, y);
+      ctx.stroke();
+    }
 
     // Trails
     trails.current.forEach(t => {
@@ -641,33 +866,65 @@ export default function App() {
     const blink = Math.floor(Date.now() / 100) % 2 === 0;
     
     if (!isInvulnerable || blink) {
-      const playerFrame = Math.floor(Date.now() / 150) % 2;
-      const playerImg = assets[`player_${playerFrame}`];
+      ctx.save();
+      ctx.translate(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2);
       
-      if (playerImg) {
-        ctx.drawImage(playerImg, playerPos.current.x, playerPos.current.y, PLAYER_WIDTH, PLAYER_HEIGHT);
-      } else {
-        ctx.fillStyle = '#00ffcc';
-        ctx.beginPath();
-        ctx.moveTo(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y);
-        ctx.lineTo(playerPos.current.x, playerPos.current.y + PLAYER_HEIGHT);
-        ctx.lineTo(playerPos.current.x + PLAYER_WIDTH, playerPos.current.y + PLAYER_HEIGHT);
-        ctx.closePath();
-        ctx.fill();
-      }
+      // Subtle tilt
+      const tilt = (keysPressed.current['ArrowLeft'] || keysPressed.current['TouchLeft']) ? -0.15 : 
+                   (keysPressed.current['ArrowRight'] || keysPressed.current['TouchRight']) ? 0.15 : 0;
+      ctx.rotate(tilt);
+
+      ctx.shadowBlur = 25;
+      ctx.shadowColor = '#00ffcc';
+      ctx.strokeStyle = '#00ffcc';
+      ctx.lineWidth = 2.5;
+      
+      // High-End Neon Vector Ship
+      ctx.beginPath();
+      // Main Body
+      ctx.moveTo(0, -PLAYER_HEIGHT/2); // Nose
+      ctx.lineTo(8, -10);
+      ctx.lineTo(PLAYER_WIDTH/2, PLAYER_HEIGHT/2 - 5); // Right Wing Tip
+      ctx.lineTo(5, PLAYER_HEIGHT/2 - 10);
+      ctx.lineTo(0, PLAYER_HEIGHT/2 - 5); // Tail center
+      ctx.lineTo(-5, PLAYER_HEIGHT/2 - 10);
+      ctx.lineTo(-PLAYER_WIDTH/2, PLAYER_HEIGHT/2 - 5); // Left Wing Tip
+      ctx.lineTo(-8, -10);
+      ctx.closePath();
+      ctx.stroke();
+      
+      // Cockpit Glow
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.ellipse(0, -5, 3, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1.0;
+      
+      // Engine/Afterburner Glow
+      const engineFlicker = Math.random() * 5;
+      ctx.shadowBlur = 15 + engineFlicker;
+      ctx.shadowColor = '#33ccff';
+      ctx.fillStyle = '#33ccff';
+      // Left Engine
+      ctx.fillRect(-12, PLAYER_HEIGHT/2 - 8, 6, 10 + engineFlicker);
+      // Right Engine
+      ctx.fillRect(6, PLAYER_HEIGHT/2 - 8, 6, 10 + engineFlicker);
+      
+      ctx.restore();
     }
 
     // Bullets
-    ctx.fillStyle = '#ff3366';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#ff3366';
+    ctx.shadowBlur = 15;
     bullets.current.forEach((b) => {
+      ctx.fillStyle = '#00ffcc';
+      ctx.shadowColor = '#00ffcc';
       ctx.fillRect(b.x, b.y, 4, 12);
     });
     
     // Enemy Bullets
-    ctx.fillStyle = '#ffcc00';
-    ctx.shadowColor = '#ffcc00';
+    ctx.fillStyle = '#ff3366';
+    ctx.shadowColor = '#ff3366';
     enemyBullets.current.forEach((b) => {
       ctx.beginPath();
       ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
@@ -676,44 +933,151 @@ export default function App() {
     ctx.shadowBlur = 0;
 
     // Enemies
-    const baseEnemyFrame = Math.floor(Date.now() / 200) % 4;
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
       
-      const currentEnemyFrame = (enemy.isDiving || enemy.isReturning) ? (Math.floor(Date.now() / 100) % 4) : baseEnemyFrame;
-      const enemyImg = assets[`enemy${enemy.type + 1}_${currentEnemyFrame}`];
+      ctx.save();
+      ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
       
-      if (enemyImg) {
-        ctx.drawImage(enemyImg, enemy.x, enemy.y, enemy.width, enemy.height);
-      } else {
-        const colors = ['#ffcc00', '#ff33cc', '#33ccff'];
-        ctx.fillStyle = colors[enemy.type];
-        ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+      if (enemy.isBoss) {
+        // Boss Rendering
+        const color = '#ff3366';
+        const pulse = Math.sin(Date.now() / 150) * 10;
+        ctx.shadowBlur = 20 + pulse;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+
+        // Main Body (Large Hexagon-like)
+        ctx.beginPath();
+        ctx.moveTo(0, -enemy.height / 2);
+        ctx.lineTo(enemy.width / 2, -enemy.height / 4);
+        ctx.lineTo(enemy.width / 2, enemy.height / 4);
+        ctx.lineTo(0, enemy.height / 2);
+        ctx.lineTo(-enemy.width / 2, enemy.height / 4);
+        ctx.lineTo(-enemy.width / 2, -enemy.height / 4);
+        ctx.closePath();
+        ctx.stroke();
+
+        // Inner details
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 20 + pulse / 2, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Phase indicators
+        if (enemy.phase! >= 2) {
+          ctx.fillStyle = '#ffcc00';
+          ctx.fillRect(-enemy.width / 2 + 10, -10, 5, 20);
+          ctx.fillRect(enemy.width / 2 - 15, -10, 5, 20);
+        }
+        if (enemy.phase! >= 3) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(0, 0, 40, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.restore();
+        return;
       }
+
+      // Rotation for diving/returning
+      if (enemy.isDiving || enemy.isReturning) {
+        const angle = Math.atan2(enemy.y - (enemy.y - 1), enemy.x - (enemy.x - (enemy.diveX || 0)));
+        ctx.rotate(angle + Math.PI/2);
+      }
+
+      const colors = ['#ffcc00', '#ff33cc', '#33ccff'];
+      const color = colors[enemy.type];
+      const pulse = Math.sin(Date.now() / 200) * 5;
+      
+      ctx.shadowBlur = 15 + pulse;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      
+      ctx.beginPath();
+      if (enemy.type === 0) {
+        // Type 0: Scout (V-Shape Wing)
+        ctx.moveTo(0, -enemy.height/2);
+        ctx.lineTo(enemy.width/2, enemy.height/2);
+        ctx.lineTo(0, enemy.height/4);
+        ctx.lineTo(-enemy.width/2, enemy.height/2);
+        ctx.closePath();
+        ctx.stroke();
+        
+        // Core
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (enemy.type === 1) {
+        // Type 1: Interceptor (Diamond Shield)
+        ctx.moveTo(0, -enemy.height/2);
+        ctx.lineTo(enemy.width/2, 0);
+        ctx.lineTo(0, enemy.height/2);
+        ctx.lineTo(-enemy.width/2, 0);
+        ctx.closePath();
+        ctx.stroke();
+        
+        // Inner Diamond
+        ctx.beginPath();
+        ctx.moveTo(0, -enemy.height/4);
+        ctx.lineTo(enemy.width/4, 0);
+        ctx.lineTo(0, enemy.height/4);
+        ctx.lineTo(-enemy.width/4, 0);
+        ctx.closePath();
+        ctx.stroke();
+        
+        // Side Thrusters
+        ctx.fillStyle = color;
+        ctx.fillRect(-enemy.width/2 - 2, -2, 4, 4);
+        ctx.fillRect(enemy.width/2 - 2, -2, 4, 4);
+      } else {
+        // Type 2: Heavy (Hexagon Fortress)
+        for(let i=0; i<6; i++) {
+          const a = (i * Math.PI * 2) / 6 - Math.PI/2;
+          const x = Math.cos(a) * enemy.width/2;
+          const y = Math.sin(a) * enemy.height/2;
+          if(i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        
+        // Inner Hexagon
+        ctx.beginPath();
+        for(let i=0; i<6; i++) {
+          const a = (i * Math.PI * 2) / 6 - Math.PI/2;
+          const x = Math.cos(a) * enemy.width/4;
+          const y = Math.sin(a) * enemy.height/4;
+          if(i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        
+        // Core Glow
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.arc(0, 0, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      ctx.restore();
     });
 
     // Particles
     particles.current.forEach(p => {
       ctx.globalAlpha = p.life / p.maxLife;
       ctx.fillStyle = p.color;
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = 2;
-
       ctx.save();
       ctx.translate(p.x, p.y);
-      if (p.rotation !== undefined) {
-        ctx.rotate(p.rotation);
-      }
-
-      if (p.type === 'line') {
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        const len = p.size * 3;
-        ctx.lineTo(-len, 0);
-        ctx.stroke();
-      } else {
-        ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
-      }
+      if (p.rotation !== undefined) ctx.rotate(p.rotation);
+      ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
       ctx.restore();
     });
     ctx.globalAlpha = 1.0;
@@ -722,8 +1086,9 @@ export default function App() {
 
     // Flash
     if (flash.current > 0) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${flash.current})`;
+      ctx.fillStyle = `rgba(255, 255, 255, ${flash.current * 0.3})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      flash.current *= 0.9;
     }
   };
 
@@ -759,6 +1124,19 @@ export default function App() {
           <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Score</span>
           <span className="text-2xl font-bold text-[#00ffcc] tracking-tighter">{score.toString().padStart(6, '0')}</span>
         </div>
+        
+        {combo > 1 && (
+          <motion.div 
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            key={combo}
+            className="flex flex-col items-center"
+          >
+            <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest">Combo</span>
+            <span className="text-3xl font-black text-[#ff3366] italic">x{combo}</span>
+          </motion.div>
+        )}
+
         <div className="flex flex-col items-center">
           <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Wave</span>
           <span className="text-xl font-bold text-[#ff33cc] tracking-tighter">{wave}</span>
@@ -778,51 +1156,51 @@ export default function App() {
       </div>
 
       {/* Game Canvas Container */}
-      <div className="relative border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_50px_rgba(0,255,204,0.1)] overflow-hidden max-w-full max-h-[70vh] aspect-[3/4]">
+      <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_50px_rgba(0,255,204,0.1)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-[3/4]">
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
-          className="block w-full h-full object-contain"
+          className="block w-full h-full object-contain bg-black"
         />
+
+        {/* Boss Health Bar */}
+        <AnimatePresence>
+          {bossHealth && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="absolute top-4 left-1/2 -translate-x-1/2 w-2/3 h-4 bg-black/50 border border-[#ff3366] rounded-full overflow-hidden"
+            >
+              <motion.div
+                initial={{ width: '100%' }}
+                animate={{ width: `${(bossHealth.current / bossHealth.max) * 100}%` }}
+                className="h-full bg-gradient-to-r from-[#ff3366] to-[#ffcc00] shadow-[0_0_10px_#ff3366]"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-[8px] font-bold uppercase tracking-widest text-white drop-shadow-md">Boss Integrity</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Overlay Screens */}
         <AnimatePresence>
-          {/* Mobile Controls */}
-          {gameState === 'PLAYING' && isTouchDevice && (
-            <div className="absolute inset-0 pointer-events-none select-none">
-              {/* Left/Right Buttons */}
-              <div className="absolute bottom-4 left-4 flex gap-2 pointer-events-auto">
-                <button
-                  onPointerDown={() => keysPressed.current['TouchLeft'] = true}
-                  onPointerUp={() => keysPressed.current['TouchLeft'] = false}
-                  onPointerLeave={() => keysPressed.current['TouchLeft'] = false}
-                  className="w-16 h-16 bg-white/10 border-2 border-[#00ffcc]/30 rounded-full flex items-center justify-center active:bg-[#00ffcc]/40 active:scale-95 transition-all"
-                >
-                  <div className="w-0 h-0 border-t-[10px] border-t-transparent border-r-[20px] border-r-[#00ffcc] border-b-[10px] border-b-transparent" />
-                </button>
-                <button
-                  onPointerDown={() => keysPressed.current['TouchRight'] = true}
-                  onPointerUp={() => keysPressed.current['TouchRight'] = false}
-                  onPointerLeave={() => keysPressed.current['TouchRight'] = false}
-                  className="w-16 h-16 bg-white/10 border-2 border-[#00ffcc]/30 rounded-full flex items-center justify-center active:bg-[#00ffcc]/40 active:scale-95 transition-all"
-                >
-                  <div className="w-0 h-0 border-t-[10px] border-t-transparent border-l-[20px] border-l-[#00ffcc] border-b-[10px] border-b-transparent" />
-                </button>
+          {waveTitle && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            >
+              <div className="text-center">
+                <h2 className={`text-5xl md:text-6xl font-black tracking-[0.2em] italic drop-shadow-[0_0_20px_rgba(255,255,255,0.5)] ${wave % 5 === 0 ? 'text-[#ff3366]' : 'text-white'}`}>
+                  {wave % 5 === 0 ? 'BOSS BATTLE' : `WAVE ${wave}`}
+                </h2>
+                <div className={`h-1 w-full mt-2 shadow-[0_0_10px_currentColor] ${wave % 5 === 0 ? 'bg-[#ff3366] text-[#ff3366]' : 'bg-[#00ffcc] text-[#00ffcc]'}`} />
               </div>
-              
-              {/* Fire Button */}
-              <div className="absolute bottom-4 right-4 pointer-events-auto">
-                <button
-                  onPointerDown={() => keysPressed.current['TouchFire'] = true}
-                  onPointerUp={() => keysPressed.current['TouchFire'] = false}
-                  onPointerLeave={() => keysPressed.current['TouchFire'] = false}
-                  className="w-20 h-20 bg-[#ff3366]/20 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/60 active:scale-90 shadow-[0_0_20px_rgba(255,51,102,0.2)]"
-                >
-                  <div className="w-6 h-6 bg-[#ff3366] rounded-sm rotate-45" />
-                </button>
-              </div>
-            </div>
+            </motion.div>
           )}
 
           {gameState === 'LOADING' && (
@@ -844,42 +1222,38 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-4 md:p-8 text-center overflow-hidden"
             >
               <motion.div
-                animate={{ y: [0, -15, 0], rotate: [0, 5, -5, 0] }}
+                animate={{ y: [0, -10, 0], rotate: [0, 3, -3, 0] }}
                 transition={{ duration: 4, repeat: Infinity }}
-                className="mb-8"
+                className="mb-4 md:mb-8"
               >
-                {assets.player_0 ? (
-                  <img src={assets.player_0.src} alt="Player" className="w-24 h-24 drop-shadow-[0_0_15px_rgba(0,255,204,0.5)]" />
-                ) : (
-                  <Rocket size={80} className="text-[#00ffcc]" />
-                )}
+                <NeonShip className="w-20 h-20 md:w-32 md:h-32 drop-shadow-[0_0_20px_rgba(0,255,204,0.6)]" />
               </motion.div>
-              <h1 className="text-6xl font-black mb-4 tracking-tighter italic text-transparent bg-clip-text bg-gradient-to-b from-white via-gray-300 to-gray-600">
+              <h1 className="text-4xl md:text-6xl font-black mb-2 md:mb-4 tracking-tighter italic text-transparent bg-clip-text bg-gradient-to-b from-white via-gray-300 to-gray-600">
                 NEON DEFENDER
               </h1>
-              <p className="text-gray-400 mb-10 max-w-xs text-sm leading-relaxed tracking-wide">
+              <p className="text-gray-400 mb-6 md:mb-10 max-w-[280px] md:max-w-xs text-xs md:text-sm leading-relaxed tracking-wide">
                 The swarm is approaching. <br/>Engage thrusters and defend the sector.
               </p>
               <button
                 onClick={startGame}
-                className="group relative px-10 py-5 bg-[#00ffcc] text-black font-bold text-xl uppercase tracking-[0.2em] hover:scale-110 transition-all duration-300 shadow-[0_0_30px_rgba(0,255,204,0.3)]"
+                className="group relative px-6 py-3 md:px-10 md:py-5 bg-[#00ffcc] text-black font-bold text-lg md:text-xl uppercase tracking-[0.2em] hover:scale-105 transition-all duration-300 shadow-[0_0_30px_rgba(0,255,204,0.3)]"
               >
                 <span className="relative z-10 flex items-center gap-3">
-                  <Play size={24} fill="currentColor" /> Launch Mission
+                  <Play size={20} className="md:w-6 md:h-6" fill="currentColor" /> Launch Mission
                 </span>
                 <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-30 transition-opacity" />
               </button>
-              <div className="mt-16 grid grid-cols-2 gap-12 text-[10px] text-gray-500 uppercase tracking-[0.4em]">
-                <div className="flex flex-col gap-2">
+              <div className="mt-8 md:mt-16 grid grid-cols-2 gap-8 md:gap-12 text-[8px] md:text-[10px] text-gray-500 uppercase tracking-[0.4em]">
+                <div className="flex flex-col gap-1 md:gap-2">
                   <span className="text-gray-400">Movement</span>
-                  <span>Arrow Keys</span>
+                  <span>{isTouchDevice ? 'Touch Drag' : 'Arrow Keys'}</span>
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1 md:gap-2">
                   <span className="text-gray-400">Weapon</span>
-                  <span>Space Bar</span>
+                  <span>{isTouchDevice ? 'Auto-Fire' : 'Space Bar'}</span>
                 </div>
               </div>
             </motion.div>
@@ -904,6 +1278,44 @@ export default function App() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Mobile Control Pad (Outside Canvas) */}
+      {gameState === 'PLAYING' && isTouchDevice && (
+        <div className="w-full max-w-[600px] mt-8 px-6 flex justify-between items-center select-none">
+          {/* Movement Group */}
+          <div className="flex gap-6">
+            <button
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
+              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
+              className="w-20 h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
+            >
+              <div className="w-0 h-0 border-t-[12px] border-t-transparent border-r-[24px] border-r-[#00ffcc] border-b-[12px] border-b-transparent" />
+            </button>
+            <button
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
+              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
+              className="w-20 h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
+            >
+              <div className="w-0 h-0 border-t-[12px] border-t-transparent border-l-[24px] border-l-[#00ffcc] border-b-[12px] border-b-transparent" />
+            </button>
+          </div>
+          
+          {/* Action Group */}
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
+              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
+              className="w-24 h-24 bg-[#ff3366]/10 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/40 active:scale-90 transition-all touch-none shadow-[0_6px_0_rgba(255,51,102,0.3)] active:translate-y-1 active:shadow-none"
+            >
+              <div className="w-8 h-8 bg-[#ff3366] rounded-sm rotate-45 shadow-[0_0_15px_rgba(255,51,102,0.5)]" />
+            </button>
+            <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest opacity-50">Fire</span>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">
