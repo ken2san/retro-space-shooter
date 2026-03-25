@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap } from 'lucide-react';
+import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2 } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
 import { audio } from './services/audio';
 
@@ -194,6 +194,12 @@ export default function App() {
   const [combo, setCombo] = useState(0);
   const [waveTitle, setWaveTitle] = useState(false);
   const [bossHealth, setBossHealth] = useState<{current: number, max: number} | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Touch Movement Refs
+  const touchStartPos = useRef({ x: 0, y: 0 });
+  const playerStartPos = useRef({ x: 0, y: 0 });
+  const isTouching = useRef(false);
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -244,8 +250,27 @@ export default function App() {
 
     checkTouch();
     window.addEventListener('resize', checkTouch);
-    return () => window.removeEventListener('resize', checkTouch);
+    
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      window.removeEventListener('resize', checkTouch);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
   }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   // Load assets on mount
   useEffect(() => {
@@ -568,13 +593,51 @@ export default function App() {
       }
       keysPressed.current[e.code] = false;
     };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (gameState !== 'PLAYING' || showUpgrade) return;
+      const touch = e.touches[0];
+      touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+      playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+      isTouching.current = true;
+      keysPressed.current['TouchFire'] = true;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isTouching.current || showUpgrade) return;
+      const touch = e.touches[0];
+      const dx = (touch.clientX - touchStartPos.current.x) * 1.5; // Sensitivity
+      const dy = (touch.clientY - touchStartPos.current.y) * 1.5;
+
+      playerPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + dx));
+      playerPos.current.y = Math.max(CANVAS_HEIGHT * 0.4, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + dy));
+    };
+
+    const handleTouchEnd = () => {
+      isTouching.current = false;
+      keysPressed.current['TouchFire'] = false;
+    };
+
     window.addEventListener('keydown', handleKeyDown, { passive: false });
     window.addEventListener('keyup', handleKeyUp, { passive: false });
+    
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+      window.addEventListener('touchmove', handleTouchMove, { passive: false });
+      window.addEventListener('touchend', handleTouchEnd);
+    }
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      if (canvas) {
+        canvas.removeEventListener('touchstart', handleTouchStart);
+        window.removeEventListener('touchmove', handleTouchMove);
+        window.removeEventListener('touchend', handleTouchEnd);
+      }
     };
-  }, []);
+  }, [gameState, showUpgrade]);
 
   // Game Loop
   const update = () => {
@@ -599,6 +662,11 @@ export default function App() {
     }
     if ((keysPressed.current['ArrowDown'] || keysPressed.current['KeyS'] || keysPressed.current['TouchDown']) && playerPos.current.y < CANVAS_HEIGHT - PLAYER_HEIGHT - 20) {
       playerPos.current.y += currentSpeed;
+      isMoving = true;
+    }
+
+    // Relative Touch Movement (Drag/Swipe)
+    if (isTouching.current && !showUpgrade) {
       isMoving = true;
     }
 
@@ -2041,7 +2109,21 @@ export default function App() {
       {/* HUD */}
       <div className="w-full max-w-[600px] flex justify-between items-end mb-4 px-4">
         <div className="flex flex-col">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Sector</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Sector</span>
+            {isTouchDevice && (
+              <button 
+                onClick={toggleFullscreen}
+                className="p-2 bg-white/10 border border-white/20 rounded-lg hover:bg-white/20 active:scale-95 transition-all flex items-center gap-2"
+                title="Toggle Fullscreen"
+              >
+                <Maximize2 size={16} className={isFullscreen ? "text-[#00ffcc]" : "text-white"} />
+                <span className="text-[10px] uppercase font-bold tracking-wider">
+                  {isFullscreen ? "Exit Full" : "Fullscreen"}
+                </span>
+              </button>
+            )}
+          </div>
           <span className="text-xl font-bold text-white tracking-tighter italic">{sectorName}</span>
           <div className="flex flex-col mt-2">
             <span className="text-[8px] text-gray-500 uppercase tracking-widest">Distance to Fortress</span>
@@ -2307,14 +2389,18 @@ export default function App() {
                 </span>
                 <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-30 transition-opacity" />
               </button>
-              <div className="mt-8 md:mt-16 grid grid-cols-2 gap-8 md:gap-12 text-[8px] md:text-[10px] text-gray-500 uppercase tracking-[0.4em]">
+              <div className="mt-8 md:mt-16 grid grid-cols-3 gap-4 md:gap-8 text-[8px] md:text-[10px] text-gray-500 uppercase tracking-[0.4em]">
                 <div className="flex flex-col gap-1 md:gap-2">
                   <span className="text-gray-400">Movement</span>
-                  <span>{isTouchDevice ? 'Touch Drag' : 'Arrow Keys'}</span>
+                  <span>{isTouchDevice ? 'Drag Anywhere' : 'Arrow Keys'}</span>
                 </div>
                 <div className="flex flex-col gap-1 md:gap-2">
                   <span className="text-gray-400">Weapon</span>
                   <span>{isTouchDevice ? 'Auto-Fire' : 'Space Bar'}</span>
+                </div>
+                <div className="flex flex-col gap-1 md:gap-2">
+                  <span className="text-gray-400">Overdrive</span>
+                  <span>{isTouchDevice ? 'Tap Icon' : 'X Key'}</span>
                 </div>
               </div>
             </motion.div>
@@ -2378,77 +2464,40 @@ export default function App() {
         </AnimatePresence>
       </div>
 
-      {/* Mobile Control Pad (Outside Canvas) */}
+      {/* Touch Feedback */}
+      {isTouchDevice && isTouching.current && (
+        <motion.div 
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 0.3 }}
+          style={{ 
+            position: 'fixed', 
+            left: touchStartPos.current.x - 30, 
+            top: touchStartPos.current.y - 30,
+            width: 60,
+            height: 60,
+            borderRadius: '50%',
+            border: '2px solid #00ffcc',
+            pointerEvents: 'none',
+            zIndex: 100
+          }}
+        />
+      )}
+
+      {/* Mobile Overdrive Button (Floating) */}
       {gameState === 'PLAYING' && isTouchDevice && (
-        <div className="w-full max-w-[700px] mt-8 px-4 flex justify-between items-center select-none">
-          {/* Movement Group - D-Pad Layout */}
-          <div className="relative w-40 h-40 md:w-48 md:h-48 flex items-center justify-center">
-            {/* Up */}
-            <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchUp'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchUp'] = false; }}
-              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchUp'] = false; }}
-              className="absolute top-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
-            >
-              <div className="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-b-[20px] border-b-[#00ffcc]" />
-            </button>
-            {/* Down */}
-            <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchDown'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchDown'] = false; }}
-              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchDown'] = false; }}
-              className="absolute bottom-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
-            >
-              <div className="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[20px] border-t-[#00ffcc]" />
-            </button>
-            {/* Left */}
-            <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
-              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
-              className="absolute left-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
-            >
-              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-b-[10px] border-b-transparent border-r-[20px] border-r-[#00ffcc]" />
-            </button>
-            {/* Right */}
-            <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
-              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
-              className="absolute right-0 w-14 h-14 md:w-16 md:h-16 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)]"
-            >
-              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-b-[10px] border-b-transparent border-l-[20px] border-l-[#00ffcc]" />
-            </button>
-            {/* Center decoration */}
-            <div className="w-8 h-8 bg-[#00ffcc]/10 rounded-full border border-[#00ffcc]/20" />
-          </div>
-          
-          {/* Overdrive Button */}
-          <button
+        <div className="fixed bottom-8 right-8 flex flex-col gap-4 z-50">
+          <button 
             onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
             onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
-            className={`w-20 h-20 md:w-24 md:h-24 rounded-full flex flex-col items-center justify-center transition-all duration-300 touch-none shadow-lg ${
+            className={`w-20 h-20 rounded-full border-2 flex flex-col items-center justify-center transition-all ${
               overdrive >= 100 
-                ? 'bg-[#ff3366] border-4 border-white animate-pulse scale-110 shadow-[0_0_30px_#ff3366]' 
-                : 'bg-[#1a1a2e] border-2 border-[#ff3366]/40 opacity-50'
+                ? 'border-[#ff3366] bg-[#ff3366]/20 shadow-[0_0_20px_#ff3366] animate-pulse' 
+                : 'border-white/20 bg-white/5 opacity-50'
             }`}
           >
-            <Zap size={24} className={overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'} fill="currentColor" />
-            <span className={`text-[8px] font-bold mt-1 ${overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'}`}>OVERDRIVE</span>
+            <Zap size={32} className={overdrive >= 100 ? 'text-[#ff3366]' : 'text-white/40'} fill={overdrive >= 100 ? 'currentColor' : 'none'} />
+            <span className="text-[8px] font-bold mt-1 text-white/60">OVERDRIVE</span>
           </button>
-
-          {/* Fire Group */}
-          <div className="flex flex-col items-center gap-1">
-            <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
-              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
-              className="w-20 h-20 md:w-24 md:h-24 bg-[#ff3366]/10 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/40 active:scale-90 transition-all touch-none shadow-[0_6px_0_rgba(255,51,102,0.3)] active:translate-y-1 active:shadow-none"
-            >
-              <div className="w-8 h-8 bg-[#ff3366] rounded-sm rotate-45 shadow-[0_0_15px_rgba(255,51,102,0.5)]" />
-            </button>
-            <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest opacity-50">Fire</span>
-          </div>
         </div>
       )}
 
