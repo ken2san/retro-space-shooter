@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Rocket, Trophy, Play, RotateCcw, Loader2 } from 'lucide-react';
+import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
 import { audio } from './services/audio';
 
@@ -103,6 +103,13 @@ const NeonShip = ({ className = "" }: { className?: string }) => (
   </svg>
 );
 
+interface PowerUp {
+  x: number;
+  y: number;
+  type: 'MULTISHOT' | 'SHIELD' | 'RAPIDFIRE';
+  life: number;
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<GameState>('LOADING');
@@ -135,6 +142,14 @@ export default function App() {
   const [combo, setCombo] = useState(0);
   const [waveTitle, setWaveTitle] = useState(false);
   const [bossHealth, setBossHealth] = useState<{current: number, max: number} | null>(null);
+
+  // Power-up & Overdrive State
+  const powerUps = useRef<PowerUp[]>([]);
+  const activeEffects = useRef<Record<string, number>>({});
+  const overdriveGauge = useRef(0);
+  const [overdrive, setOverdrive] = useState(0);
+  const isOverdriveActive = useRef(false);
+  const overdriveEndTime = useRef(0);
 
   // Initialize stars
   useEffect(() => {
@@ -364,6 +379,44 @@ export default function App() {
     trails.current.forEach(t => t.life -= 1);
     trails.current = trails.current.filter(t => t.life > 0);
 
+    // Update Power-ups
+    powerUps.current.forEach(p => {
+      p.y += 1.5;
+      // Collision with player
+      const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - p.x;
+      const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - p.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 30) {
+        activeEffects.current[p.type] = Date.now() + 8000; // 8 seconds
+        p.life = 0;
+        audio.playPowerUp?.(); // Optional sound
+        setScore(s => s + 500);
+      }
+    });
+    powerUps.current = powerUps.current.filter(p => p.y < CANVAS_HEIGHT && p.life > 0);
+
+    // Overdrive Logic
+    if (isOverdriveActive.current) {
+      if (Date.now() > overdriveEndTime.current) {
+        isOverdriveActive.current = false;
+        overdriveGauge.current = 0;
+        setOverdrive(0);
+      } else {
+        const remaining = (overdriveEndTime.current - Date.now()) / 10000;
+        setOverdrive(remaining * 100);
+      }
+    } else {
+      if (keysPressed.current['KeyX'] || keysPressed.current['TouchOverdrive']) {
+        if (overdriveGauge.current >= 100) {
+          isOverdriveActive.current = true;
+          overdriveEndTime.current = Date.now() + 10000; // 10 seconds
+          shake.current = 30;
+          flash.current = 0.5;
+          audio.playOverdrive?.(); // Optional sound
+        }
+      }
+    }
+
     // Update shake & flash
     if (shake.current > 0) shake.current *= 0.85;
     if (shake.current < 0.5) shake.current = 0;
@@ -371,13 +424,35 @@ export default function App() {
     if (flash.current < 0) flash.current = 0;
 
     // Shooting
+    const isRapid = (activeEffects.current['RAPIDFIRE'] > Date.now()) || isOverdriveActive.current;
+    const shootInterval = isOverdriveActive.current ? 80 : isRapid ? 120 : 250;
+    
     if (keysPressed.current['Space'] || keysPressed.current['TouchFire']) {
       const now = Date.now();
-      if (now - lastShotTime.current > 250) {
-        bullets.current.push({
-          x: playerPos.current.x + PLAYER_WIDTH / 2 - 2,
-          y: playerPos.current.y,
-        });
+      if (now - lastShotTime.current > shootInterval) {
+        const isMulti = activeEffects.current['MULTISHOT'] > Date.now();
+        const isOver = isOverdriveActive.current;
+
+        if (isOver) {
+          // Super Overdrive Shot
+          for (let i = -2; i <= 2; i++) {
+            bullets.current.push({
+              x: playerPos.current.x + PLAYER_WIDTH / 2 - 2 + i * 15,
+              y: playerPos.current.y,
+              vx: i * 0.5,
+              vy: -BULLET_SPEED * 1.5
+            });
+          }
+        } else if (isMulti) {
+          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y });
+          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y });
+          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10 });
+        } else {
+          bullets.current.push({
+            x: playerPos.current.x + PLAYER_WIDTH / 2 - 2,
+            y: playerPos.current.y,
+          });
+        }
         audio.playShoot();
         lastShotTime.current = now;
       }
@@ -385,8 +460,12 @@ export default function App() {
 
     // Update bullets
     bullets.current = bullets.current
-      .map((b) => ({ ...b, y: b.y - BULLET_SPEED }))
-      .filter((b) => b.y > -20);
+      .map((b) => ({ 
+        ...b, 
+        x: b.x + (b.vx || 0),
+        y: b.y + (b.vy || -BULLET_SPEED) 
+      }))
+      .filter((b) => b.y > -20 && b.y < CANVAS_HEIGHT + 20);
 
     // Update enemy bullets
     const currentEnemyBulletSpeed = ENEMY_BULLET_SPEED + waveRef.current * 0.2;
@@ -646,6 +725,12 @@ export default function App() {
               setBossHealth(null);
               setScore(s => s + 5000 * (waveRef.current / 5));
               
+              // Overdrive gauge increase
+              if (!isOverdriveActive.current) {
+                overdriveGauge.current = Math.min(100, overdriveGauge.current + 20);
+                setOverdrive(overdriveGauge.current);
+              }
+
               // Big explosion
               for(let i=0; i<100; i++) {
                 const angle = Math.random() * Math.PI * 2;
@@ -686,6 +771,24 @@ export default function App() {
           const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.1);
           setScore((s) => s + basePoints + comboBonus);
           
+          // Overdrive gauge increase
+          if (!isOverdriveActive.current) {
+            const gaugeGain = (enemy.isDiving ? 3 : 1) * (1 + comboRef.current * 0.1);
+            overdriveGauge.current = Math.min(100, overdriveGauge.current + gaugeGain);
+            setOverdrive(overdriveGauge.current);
+          }
+
+          // Spawn Power-up chance
+          if (Math.random() < 0.08) {
+            const types: PowerUp['type'][] = ['MULTISHOT', 'SHIELD', 'RAPIDFIRE'];
+            powerUps.current.push({
+              x: enemy.x + enemy.width / 2,
+              y: enemy.y + enemy.height / 2,
+              type: types[Math.floor(Math.random() * types.length)],
+              life: 1
+            });
+          }
+
           audio.playEnemyHit();
           shake.current = Math.max(shake.current, 5);
           
@@ -739,6 +842,18 @@ export default function App() {
     });
 
     if (playerHit && Date.now() > invulnerableUntil.current) {
+      // Check for Shield
+      if (activeEffects.current['SHIELD'] > Date.now()) {
+        activeEffects.current['SHIELD'] = 0; // Consume shield
+        invulnerableUntil.current = Date.now() + 1000; // Brief invulnerability
+        shake.current = 10;
+        audio.playPlayerHit(); // Or a shield break sound
+        return;
+      }
+
+      // Overdrive invulnerability
+      if (isOverdriveActive.current) return;
+
       audio.playPlayerHit();
       shake.current = 20;
       flash.current = 1;
@@ -861,6 +976,35 @@ export default function App() {
     });
     ctx.globalAlpha = 1.0;
 
+    // Power-ups
+    powerUps.current.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(Date.now() / 500);
+      const color = p.type === 'MULTISHOT' ? '#ffcc00' : p.type === 'SHIELD' ? '#33ccff' : '#ff33cc';
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-10, -10, 20, 20);
+      ctx.fillStyle = color;
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.type[0], 0, 0);
+      ctx.restore();
+    });
+
+    // Overdrive Screen Effect
+    if (isOverdriveActive.current) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const pulse = Math.sin(Date.now() / 100) * 0.1;
+      ctx.fillStyle = `rgba(255, 51, 102, ${0.1 + pulse})`;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.restore();
+    }
+
     // Player
     const isInvulnerable = Date.now() < invulnerableUntil.current;
     const blink = Math.floor(Date.now() / 100) % 2 === 0;
@@ -904,12 +1048,22 @@ export default function App() {
       // Engine/Afterburner Glow
       const engineFlicker = Math.random() * 5;
       ctx.shadowBlur = 15 + engineFlicker;
-      ctx.shadowColor = '#33ccff';
-      ctx.fillStyle = '#33ccff';
+      ctx.shadowColor = isOverdriveActive.current ? '#ff3366' : '#33ccff';
+      ctx.fillStyle = isOverdriveActive.current ? '#ff3366' : '#33ccff';
       // Left Engine
-      ctx.fillRect(-12, PLAYER_HEIGHT/2 - 8, 6, 10 + engineFlicker);
+      ctx.fillRect(-12, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActive.current ? 20 : 10) + engineFlicker);
       // Right Engine
-      ctx.fillRect(6, PLAYER_HEIGHT/2 - 8, 6, 10 + engineFlicker);
+      ctx.fillRect(6, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActive.current ? 20 : 10) + engineFlicker);
+
+      // Shield Effect
+      if (activeEffects.current['SHIELD'] > Date.now()) {
+        ctx.strokeStyle = '#33ccff';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(0, 0, 35, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       
       ctx.restore();
     }
@@ -917,9 +1071,9 @@ export default function App() {
     // Bullets
     ctx.shadowBlur = 15;
     bullets.current.forEach((b) => {
-      ctx.fillStyle = '#00ffcc';
-      ctx.shadowColor = '#00ffcc';
-      ctx.fillRect(b.x, b.y, 4, 12);
+      ctx.fillStyle = isOverdriveActive.current ? '#ff3366' : '#00ffcc';
+      ctx.shadowColor = isOverdriveActive.current ? '#ff3366' : '#00ffcc';
+      ctx.fillRect(b.x, b.y, 4, isOverdriveActive.current ? 20 : 12);
     });
     
     // Enemy Bullets
@@ -1138,6 +1292,19 @@ export default function App() {
         )}
 
         <div className="flex flex-col items-center">
+          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Overdrive</span>
+          <div className="w-24 h-2 bg-black/50 border border-[#ff3366] rounded-full overflow-hidden">
+            <motion.div 
+              animate={{ width: `${overdrive}%` }}
+              className={`h-full ${overdrive >= 100 ? 'bg-white shadow-[0_0_10px_#fff]' : 'bg-[#ff3366]'}`}
+            />
+          </div>
+          {overdrive >= 100 && !isOverdriveActive.current && (
+            <span className="text-[8px] text-white animate-pulse mt-1 font-bold">READY [X]</span>
+          )}
+        </div>
+
+        <div className="flex flex-col items-center">
           <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Wave</span>
           <span className="text-xl font-bold text-[#ff33cc] tracking-tighter">{wave}</span>
         </div>
@@ -1163,6 +1330,23 @@ export default function App() {
           height={CANVAS_HEIGHT}
           className="block w-full h-full object-contain bg-black"
         />
+
+        {/* Active Power-ups UI */}
+        <div className="absolute bottom-4 left-4 flex flex-col gap-2">
+          {Object.entries(activeEffects.current).map(([type, expiry]) => (
+            (expiry as number) > Date.now() && (
+              <motion.div 
+                key={type}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                className="flex items-center gap-2 bg-black/40 backdrop-blur-sm border border-white/20 px-2 py-1 rounded text-[10px] font-bold"
+              >
+                <div className={`w-2 h-2 rounded-full ${type === 'MULTISHOT' ? 'bg-[#ffcc00]' : type === 'SHIELD' ? 'bg-[#33ccff]' : 'bg-[#ff33cc]'}`} />
+                <span className="uppercase tracking-widest">{type}</span>
+              </motion.div>
+            )
+          ))}
+        </div>
 
         {/* Boss Health Bar */}
         <AnimatePresence>
@@ -1303,16 +1487,31 @@ export default function App() {
           </div>
           
           {/* Action Group */}
-          <div className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-6">
             <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
-              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
-              className="w-24 h-24 bg-[#ff3366]/10 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/40 active:scale-90 transition-all touch-none shadow-[0_6px_0_rgba(255,51,102,0.3)] active:translate-y-1 active:shadow-none"
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
+              className={`w-20 h-20 rounded-full flex flex-col items-center justify-center transition-all duration-300 touch-none shadow-lg ${
+                overdrive >= 100 
+                  ? 'bg-[#ff3366] border-4 border-white animate-pulse scale-110 shadow-[0_0_30px_#ff3366]' 
+                  : 'bg-[#1a1a2e] border-2 border-[#ff3366]/40 opacity-50'
+              }`}
             >
-              <div className="w-8 h-8 bg-[#ff3366] rounded-sm rotate-45 shadow-[0_0_15px_rgba(255,51,102,0.5)]" />
+              <Zap size={24} className={overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'} fill="currentColor" />
+              <span className={`text-[8px] font-bold mt-1 ${overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'}`}>OVERDRIVE</span>
             </button>
-            <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest opacity-50">Fire</span>
+
+            <div className="flex flex-col items-center gap-1">
+              <button
+                onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = true; }}
+                onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
+                onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
+                className="w-24 h-24 bg-[#ff3366]/10 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/40 active:scale-90 transition-all touch-none shadow-[0_6px_0_rgba(255,51,102,0.3)] active:translate-y-1 active:shadow-none"
+              >
+                <div className="w-8 h-8 bg-[#ff3366] rounded-sm rotate-45 shadow-[0_0_15px_rgba(255,51,102,0.5)]" />
+              </button>
+              <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest opacity-50">Fire</span>
+            </div>
           </div>
         </div>
       )}
