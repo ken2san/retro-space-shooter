@@ -14,10 +14,10 @@ const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 800;
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 50;
-const PLAYER_SPEED = 3;
+const PLAYER_SPEED = 3.5;
 const BULLET_SPEED = 5;
-const ENEMY_DIVE_SPEED = 2;
-const ENEMY_BULLET_SPEED = 2.5;
+const ENEMY_DIVE_SPEED = 1.8;
+const ENEMY_BULLET_SPEED = 2.2;
 const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
 const ENEMY_SPACING = 55;
@@ -202,6 +202,7 @@ export default function App() {
   const [overdrive, setOverdrive] = useState(0);
   const isOverdriveActive = useRef(false);
   const overdriveEndTime = useRef(0);
+  const pauseStartTime = useRef(0);
 
   // Warp Transition State
   const isWarping = useRef(false);
@@ -347,7 +348,7 @@ export default function App() {
 
     if (isBossWave) {
       const isFinalBoss = waveNum >= 25;
-      const bossHealthVal = (1000 + (waveNum / 5) * 500) * (isFinalBoss ? 2 : 1);
+      const bossHealthVal = (500 + (waveNum / 5) * 400) * (isFinalBoss ? 2 : 1);
       const bossPath = [
         { x: CANVAS_WIDTH / 2, y: -200 },
         { x: CANVAS_WIDTH / 2, y: 80 }
@@ -501,6 +502,11 @@ export default function App() {
       magnetRef.current += 1;
     }
     
+    // Resume overdrive timer if active
+    if (isOverdriveActive.current) {
+      overdriveEndTime.current += (Date.now() - pauseStartTime.current);
+    }
+    
     setShowUpgrade(false);
     
     waveRef.current += 1;
@@ -572,7 +578,7 @@ export default function App() {
 
   // Game Loop
   const update = () => {
-    if (gameState !== 'PLAYING') return;
+    if (gameState !== 'PLAYING' || showUpgrade) return;
 
     // Player movement
     let isMoving = false;
@@ -1266,7 +1272,7 @@ export default function App() {
     });
 
     // Player collision (smaller hitbox for dodging)
-    const hitMargin = 12;
+    const hitMargin = 15;
     const px = playerPos.current.x + hitMargin;
     const py = playerPos.current.y + hitMargin;
     const pw = PLAYER_WIDTH - hitMargin * 2;
@@ -1383,6 +1389,7 @@ export default function App() {
         const shuffled = options.sort(() => 0.5 - Math.random());
         setUpgradeOptions(shuffled.slice(0, 2));
         setShowUpgrade(true);
+        pauseStartTime.current = Date.now();
       }, 1500);
     }
 
