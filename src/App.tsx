@@ -168,6 +168,9 @@ export default function App() {
   const [upgradeOptions, setUpgradeOptions] = useState<{id: string, label: string, desc: string}[]>([]);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
   const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [hasWingman, setHasWingman] = useState(false);
+  const wingmanRef = useRef(false);
+  const wingmanPos = useRef({ x: 0, y: 0 });
 
   // Game state refs for the loop
   const livesRef = useRef(3);
@@ -368,7 +371,8 @@ export default function App() {
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
-    const stage = Math.min(5, Math.ceil(waveNum / 3)); // 5 Stages, 3 waves each
+    const stage = Math.min(5, Math.ceil(waveNum / 3));
+    const isBossWave = waveNum % 3 === 0;
     
     const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
       x: path ? path[0].x : x, 
@@ -383,52 +387,76 @@ export default function App() {
       entryDelay: delay
     });
 
-    if (stage === 1) {
-      // Tutorial: Simple Scouts
-      for (let i = 0; i < 10; i++) {
-        newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
-      }
-    } else if (stage === 2) {
-      // Asteroid Belt: No enemies, just asteroids (handled in update)
-      // But we need to spawn some "Scouts" to trigger wave clear
-      for (let i = 0; i < 5; i++) {
-        newEnemies.push(createEnemy(100 + i * 100, -100, 0));
-      }
-    } else if (stage === 3) {
-      // Heavy Fire: Snipers + Mini-boss
-      if (waveNum % 3 === 0) {
-        // Mini-boss
-        newEnemies.push({
-          ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 1),
-          width: 120, height: 100, isBoss: true, health: 1000, maxHealth: 1000,
+    if (isBossWave) {
+      audio.playBossWarning();
+      if (stage === 1) {
+        // Stage 1 Boss: Alpha Scout
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 0),
+          width: 100, height: 80, isBoss: true, health: 800, maxHealth: 800,
           phase: 1, moveDir: 1, lastShotTime: 0
-        });
-        setBossHealth({ current: 1000, max: 1000 });
-        audio.playBossWarning();
-      } else {
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 800, max: 800 });
+      } else if (stage === 2) {
+        // Stage 2 Boss: Asteroid Mother
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 3), // Type 3 for Asteroid Mother
+          width: 120, height: 120, isBoss: true, health: 1500, maxHealth: 1500,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 1500, max: 1500 });
+      } else if (stage === 3) {
+        // Stage 3 Boss: Sniper Carrier
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 70, 80, 1),
+          width: 140, height: 100, isBoss: true, health: 2500, maxHealth: 2500,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 2500, max: 2500 });
+      } else if (stage === 4) {
+        // Stage 4 Boss: Speed Demon
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 2),
+          width: 100, height: 120, isBoss: true, health: 3500, maxHealth: 3500,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 3500, max: 3500 });
+      } else if (stage === 5) {
+        // Stage 5 Boss: The Core
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 90, 80, 2),
+          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 6000, maxHealth: 6000,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 6000, max: 6000 });
+      }
+    } else {
+      // Normal Waves
+      if (stage === 1) {
+        for (let i = 0; i < 10 + (waveNum % 3) * 5; i++) {
+          newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
+        }
+      } else if (stage === 2) {
+        // Asteroid Belt: Mix of asteroids and scouts
+        for (let i = 0; i < 8; i++) {
+          newEnemies.push(createEnemy(100 + (i % 4) * 120, 60 + Math.floor(i / 4) * 80, 0));
+        }
+      } else if (stage === 3) {
         for (let i = 0; i < 15; i++) {
           newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, 1));
         }
-      }
-    } else if (stage === 4) {
-      // Chase: Fast enemies from all sides
-      for (let i = 0; i < 20; i++) {
-        const x = Math.random() * CANVAS_WIDTH;
-        const y = -Math.random() * 500;
-        newEnemies.push(createEnemy(x, y, 2));
-      }
-    } else if (stage === 5) {
-      // Final Front: Final Boss
-      if (waveNum % 3 === 0) {
-        newEnemies.push({
-          ...createEnemy(CANVAS_WIDTH / 2 - 90, 80, 2),
-          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 5000, maxHealth: 5000,
-          phase: 1, moveDir: 1, lastShotTime: 0
-        });
-        setBossHealth({ current: 5000, max: 5000 });
-        audio.playBossWarning();
-      } else {
-        // Elite guards
+      } else if (stage === 4) {
+        for (let i = 0; i < 20; i++) {
+          const x = Math.random() * CANVAS_WIDTH;
+          const y = -Math.random() * 500;
+          newEnemies.push(createEnemy(x, y, 2));
+        }
+      } else if (stage === 5) {
         for (let i = 0; i < 20; i++) {
           newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, i % 3));
         }
@@ -461,8 +489,9 @@ export default function App() {
     setWave(waveRef.current);
     
     const stage = Math.min(5, Math.ceil(waveRef.current / 3));
+    const sector = ((waveRef.current - 1) % 3) + 1;
     const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
-    setSectorName(stageNames[stage - 1]);
+    setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
     
     setDistance(prev => Math.max(0, prev - 1000));
     initEnemies(waveRef.current);
@@ -482,7 +511,7 @@ export default function App() {
     setScore(0);
     setLives(3);
     setWave(1);
-    setSectorName('Outer Rim');
+    setSectorName('Tutorial - SECTOR 1');
     setDistance(25000);
     setScrapCount(0);
     setShowUpgrade(false);
@@ -491,6 +520,8 @@ export default function App() {
     magnetRef.current = 1;
     livesRef.current = 3;
     waveRef.current = 1;
+    setHasWingman(false);
+    wingmanRef.current = false;
     invulnerableUntil.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     bullets.current = [];
@@ -654,6 +685,44 @@ export default function App() {
     // Apply slow-mo recovery
     if (timeScale.current < 1.0) {
       timeScale.current = Math.min(1.0, timeScale.current + 0.005);
+    }
+
+    // Wingman Logic
+    if (wingmanRef.current) {
+      const wingmanTargetX = playerPos.current.x + 50;
+      const wingmanTargetY = playerPos.current.y + 10;
+      
+      // Smooth follow
+      const wdx = wingmanTargetX - wingmanPos.current.x;
+      const wdy = wingmanTargetY - wingmanPos.current.y;
+      wingmanPos.current.x += wdx * 0.1;
+      wingmanPos.current.y += wdy * 0.1;
+
+      // Wingman firing
+      if (keysPressed.current['Space'] || keysPressed.current['TouchFire']) {
+        const now = Date.now();
+        if (now - lastShotTime.current > (isOverdriveActive.current ? 75 : 150)) {
+          bullets.current.push({
+            x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
+            y: wingmanPos.current.y,
+            vx: 0, vy: -10, damage: firepowerRef.current, color: '#ff33cc'
+          });
+        }
+      }
+
+      // Wingman collision with enemy bullets
+      enemyBullets.current.forEach((bullet, idx) => {
+        const dx = bullet.x - (wingmanPos.current.x + PLAYER_WIDTH / 2);
+        const dy = bullet.y - (wingmanPos.current.y + PLAYER_HEIGHT / 2);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 15) {
+          enemyBullets.current.splice(idx, 1);
+          createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
+          audio.playExplosion(wingmanPos.current.x);
+          setHasWingman(false);
+          wingmanRef.current = false;
+        }
+      });
     }
 
     // Player movement with Lerp
@@ -924,11 +993,33 @@ export default function App() {
     // Update enemy bullets
     const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * timeScale.current;
     enemyBullets.current = enemyBullets.current
-      .map((b) => ({ 
-        ...b, 
-        x: b.x + (b.vx || 0) * timeScale.current,
-        y: b.y + (b.vy || currentEnemyBulletSpeed) 
-      }))
+      .map((b) => {
+        let vx = b.vx || 0;
+        let vy = b.vy || currentEnemyBulletSpeed;
+
+        if (b.isHoming) {
+          const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - b.x;
+          const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          vx += (dx / dist) * 0.1;
+          vy += (dy / dist) * 0.1;
+          
+          // Cap speed
+          const speed = Math.sqrt(vx * vx + vy * vy);
+          if (speed > 4) {
+            vx = (vx / speed) * 4;
+            vy = (vy / speed) * 4;
+          }
+        }
+
+        return {
+          ...b,
+          vx,
+          vy,
+          x: b.x + vx * timeScale.current,
+          y: b.y + vy
+        };
+      })
       .filter((b) => b.y < CANVAS_HEIGHT + 20 && b.x > -20 && b.x < CANVAS_WIDTH + 20);
 
     // Enemy random shooting
@@ -998,13 +1089,16 @@ export default function App() {
         return;
       }
 
+      // Boss Logic
       if (enemy.isBoss) {
-        // Boss Logic
+        const stage = Math.min(5, Math.ceil(waveRef.current / 3));
+        
         if (enemy.y < enemy.originY) {
           enemy.y += 1; // Entry
         } else {
           // Horizontal movement
-          enemy.x += (enemy.moveDir || 1) * 1.5;
+          const moveSpeed = stage === 4 ? 4 : 1.5; // Speed Demon is faster
+          enemy.x += (enemy.moveDir || 1) * moveSpeed;
           if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
             enemy.moveDir = (enemy.moveDir || 1) * -1;
           }
@@ -1015,13 +1109,15 @@ export default function App() {
 
           // Boss shooting
           const now = Date.now();
-          const shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
+          let shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
+          if (stage === 5) shootInterval *= 0.7; // Final boss fires faster
+          
           if (now - (enemy.lastShotTime || 0) > shootInterval) {
             enemy.lastShotTime = now;
             audio.playEnemyShoot(enemy.x + enemy.width / 2);
 
-            if (enemy.phase === 1) {
-              // Spread shot
+            if (stage === 1) {
+              // Alpha Scout: Simple spread
               for (let i = -2; i <= 2; i++) {
                 enemyBullets.current.push({
                   x: enemy.x + enemy.width / 2,
@@ -1030,8 +1126,31 @@ export default function App() {
                   vy: 3
                 });
               }
-            } else if (enemy.phase === 2) {
-              // Targeted + Spread
+            } else if (stage === 2) {
+              // Asteroid Mother: Circular burst + Spawns mini-asteroids
+              for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                enemyBullets.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height / 2,
+                  vx: Math.cos(angle) * 2,
+                  vy: Math.sin(angle) * 2
+                });
+              }
+              // Spawn asteroid
+              if (Math.random() > 0.5) {
+                asteroids.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height / 2,
+                  size: 20 + Math.random() * 20,
+                  speed: 2 + Math.random() * 2,
+                  hp: 2,
+                  rotation: Math.random() * Math.PI * 2,
+                  rotSpeed: (Math.random() - 0.5) * 0.1
+                });
+              }
+            } else if (stage === 3) {
+              // Sniper Carrier: Homing lasers
               const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
               const dy = playerPos.current.y - (enemy.y + enemy.height);
               const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1039,14 +1158,26 @@ export default function App() {
                 enemyBullets.current.push({
                   x: enemy.x + enemy.width / 2,
                   y: enemy.y + enemy.height,
-                  vx: (dx / dist) * 3 + i * 0.5,
-                  vy: (dy / dist) * 3
+                  vx: (dx / dist) * 4 + i * 0.3,
+                  vy: (dy / dist) * 4,
+                  isHoming: true
                 });
               }
-            } else {
-              // Circle burst
-              for (let i = 0; i < 12; i++) {
-                const angle = (i / 12) * Math.PI * 2;
+            } else if (stage === 4) {
+              // Speed Demon: Fast dash + Bullet trail
+              enemy.moveDir = (enemy.moveDir || 1) * 1.05; // Accelerate
+              for (let i = 0; i < 3; i++) {
+                enemyBullets.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height / 2,
+                  vx: (Math.random() - 0.5) * 2,
+                  vy: 2
+                });
+              }
+            } else if (stage === 5) {
+              // The Core: Bullet Hell
+              for (let i = 0; i < 16; i++) {
+                const angle = (i / 16) * Math.PI * 2 + (now / 500);
                 enemyBullets.current.push({
                   x: enemy.x + enemy.width / 2,
                   y: enemy.y + enemy.height / 2,
@@ -1241,6 +1372,13 @@ export default function App() {
               enemy.alive = false;
               setBossHealth(null);
               setScore(s => s + 5000 * (waveRef.current / 5));
+              
+              // Reward Wingman on Stage 2 Boss defeat
+              if (Math.ceil(waveRef.current / 3) === 2) {
+                setHasWingman(true);
+                wingmanRef.current = true;
+                wingmanPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+              }
               
               if (enemy.isFinalBoss) {
                 setGameState('VICTORY');
@@ -1793,6 +1931,29 @@ export default function App() {
       ctx.restore();
     }
 
+    // Wingman Rendering
+    if (hasWingman) {
+      ctx.save();
+      ctx.translate(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
+      ctx.scale(0.7, 0.7); // Smaller
+      
+      const color = '#ff33cc';
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -PLAYER_HEIGHT / 2);
+      ctx.lineTo(PLAYER_WIDTH / 2, PLAYER_HEIGHT / 2);
+      ctx.lineTo(0, PLAYER_HEIGHT / 4);
+      ctx.lineTo(-PLAYER_WIDTH / 2, PLAYER_HEIGHT / 2);
+      ctx.closePath();
+      ctx.stroke();
+      
+      ctx.restore();
+    }
+
     // Bullets
     ctx.shadowBlur = 15;
     bullets.current.forEach((b) => {
@@ -2164,7 +2325,7 @@ export default function App() {
       <div className="w-full max-w-[600px] flex justify-between items-end mb-4 px-4">
         <div className="flex flex-col">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Sector</span>
+            <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Stage</span>
             {isTouchDevice && (
               <button 
                 onClick={toggleFullscreen}
@@ -2352,8 +2513,8 @@ export default function App() {
                   className="absolute -top-6 left-0 h-[2px] bg-gradient-to-r from-transparent via-[#00ffcc] to-transparent"
                 />
                 <div className="relative">
-                  <h2 className={`text-5xl md:text-7xl font-black tracking-[0.3em] italic drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${wave % 5 === 0 ? 'text-[#ff3366]' : 'text-white'}`}>
-                    {wave % 5 === 0 ? 'BOSS BATTLE' : `SECTOR ${wave.toString().padStart(2, '0')}`}
+                  <h2 className={`text-5xl md:text-7xl font-black tracking-[0.3em] italic drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${wave % 3 === 0 ? 'text-[#ff3366]' : 'text-white'}`}>
+                    {wave % 3 === 0 ? 'BOSS BATTLE' : `STAGE ${Math.ceil(wave / 3)}-${((wave - 1) % 3) + 1}`}
                   </h2>
                   <p className="text-[#00ffcc] text-xs mt-2 tracking-[0.5em] font-bold uppercase">{sectorName}</p>
                   {/* Glitch clones for stylish effect */}
@@ -2362,14 +2523,14 @@ export default function App() {
                     transition={{ duration: 0.1, repeat: Infinity }}
                     className="absolute inset-0 text-5xl md:text-7xl font-black tracking-[0.3em] italic text-[#00ffcc] -z-10 translate-x-1"
                   >
-                    {wave % 5 === 0 ? 'BOSS BATTLE' : `SECTOR ${wave.toString().padStart(2, '0')}`}
+                    {wave % 3 === 0 ? 'BOSS BATTLE' : `STAGE ${Math.ceil(wave / 3)}-${((wave - 1) % 3) + 1}`}
                   </motion.h2>
                   <motion.h2 
                     animate={{ x: [2, -2, 2], opacity: [0.3, 0.1, 0.3] }}
                     transition={{ duration: 0.1, repeat: Infinity }}
                     className="absolute inset-0 text-5xl md:text-7xl font-black tracking-[0.3em] italic text-[#ff3366] -z-10 -translate-x-1"
                   >
-                    {wave % 5 === 0 ? 'BOSS BATTLE' : `SECTOR ${wave.toString().padStart(2, '0')}`}
+                    {wave % 3 === 0 ? 'BOSS BATTLE' : `STAGE ${Math.ceil(wave / 3)}-${((wave - 1) % 3) + 1}`}
                   </motion.h2>
                 </div>
                 <motion.div
