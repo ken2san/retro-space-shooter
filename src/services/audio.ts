@@ -369,6 +369,88 @@ class RetroAudio {
     osc.stop(this.ctx.currentTime + 0.4);
   }
 
+  playGraze() {
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1500, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(2500, this.ctx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.05);
+  }
+
+  playBossWarning() {
+    if (!this.ctx || !this.masterGain) return;
+    const duration = 2.0;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, this.ctx.currentTime);
+    osc.frequency.setValueAtTime(110, this.ctx.currentTime + 0.5);
+    osc.frequency.setValueAtTime(110, this.ctx.currentTime + 1.0);
+    osc.frequency.setValueAtTime(110, this.ctx.currentTime + 1.5);
+    
+    gain.gain.setValueAtTime(0, this.ctx.currentTime);
+    for(let i=0; i<4; i++) {
+      gain.gain.linearRampToValueAtTime(0.3, this.ctx.currentTime + i * 0.5 + 0.1);
+      gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + i * 0.5 + 0.4);
+    }
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start();
+    osc.stop(this.ctx.currentTime + duration);
+  }
+
+  playStageStart() {
+    if (!this.ctx || !this.masterGain) return;
+    const notes = [440, 554.37, 659.25, 880]; // A C# E A
+    notes.forEach((note, i) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(note, this.ctx!.currentTime + i * 0.1);
+      gain.gain.setValueAtTime(0, this.ctx!.currentTime + i * 0.1);
+      gain.gain.linearRampToValueAtTime(0.1, this.ctx!.currentTime + i * 0.1 + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx!.currentTime + i * 0.1 + 0.2);
+      osc.connect(gain);
+      gain.connect(this.masterGain!);
+      osc.start(this.ctx!.currentTime + i * 0.1);
+      osc.stop(this.ctx!.currentTime + i * 0.1 + 0.2);
+    });
+  }
+
+  playHacking() {
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+    
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    lfo.frequency.value = 20;
+    lfoGain.gain.value = 50;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    
+    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.0);
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    lfo.start();
+    osc.start();
+    lfo.stop(this.ctx.currentTime + 1.0);
+    osc.stop(this.ctx.currentTime + 1.0);
+  }
+
   playBGM() {
     if (!this.ctx || !this.masterGain) return;
     this.stopBGM();

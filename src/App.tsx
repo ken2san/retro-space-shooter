@@ -15,6 +15,9 @@ const CANVAS_HEIGHT = 800;
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 50;
 const PLAYER_SPEED = 3.5;
+const FOLLOW_SMOOTHNESS = 0.15;
+const GRAZE_DISTANCE = 40;
+const MAX_OVERDRIVE = 100;
 const BULLET_SPEED = 5;
 const ENEMY_DIVE_SPEED = 1.8;
 const ENEMY_BULLET_SPEED = 2.2;
@@ -22,7 +25,7 @@ const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
 const ENEMY_SPACING = 55;
 
-type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY';
+type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR';
 
 interface Bullet {
   x: number;
@@ -171,6 +174,13 @@ export default function App() {
   const waveRef = useRef(1);
   const invulnerableUntil = useRef(0);
   const playerPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
+  const targetPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
+  const playerTilt = useRef(0);
+  const timeScale = useRef(1.0);
+  const grazeCount = useRef(0);
+  const isDualFighter = useRef(false);
+  const isHacked = useRef(false);
+  const hackStartTime = useRef(0);
   const bullets = useRef<Bullet[]>([]);
   const enemyBullets = useRef<Bullet[]>([]);
   const enemies = useRef<Enemy[]>([]);
@@ -200,6 +210,9 @@ export default function App() {
   const touchStartPos = useRef({ x: 0, y: 0 });
   const playerStartPos = useRef({ x: 0, y: 0 });
   const isTouching = useRef(false);
+  const touchPoints = useRef<Record<number, { x: number, y: number }>>({});
+  const lastTapTime = useRef(0);
+  const [touchFeedback, setTouchFeedback] = useState<{ x: number, y: number } | null>(null);
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -355,8 +368,7 @@ export default function App() {
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
     const newEnemies: Enemy[] = [];
-    const isBossWave = waveNum % 5 === 0;
-    const formationType = isBossWave ? 'BOSS' : waveNum % 4; // 1, 2, 3, 0
+    const stage = Math.min(5, Math.ceil(waveNum / 3)); // 5 Stages, 3 waves each
     
     const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
       x: path ? path[0].x : x, 
@@ -371,144 +383,55 @@ export default function App() {
       entryDelay: delay
     });
 
-    if (isBossWave) {
-      const isFinalBoss = waveNum >= 25;
-      const bossHealthVal = (500 + (waveNum / 5) * 400) * (isFinalBoss ? 2 : 1);
-      const bossPath = [
-        { x: CANVAS_WIDTH / 2, y: -200 },
-        { x: CANVAS_WIDTH / 2, y: 80 }
-      ];
-      newEnemies.push({
-        ...createEnemy(CANVAS_WIDTH / 2 - (isFinalBoss ? 90 : 60), 80, 0, 0, bossPath),
-        width: isFinalBoss ? 180 : 120,
-        height: isFinalBoss ? 150 : 100,
-        isBoss: true,
-        isFinalBoss,
-        health: bossHealthVal,
-        maxHealth: bossHealthVal,
-        phase: 1,
-        moveDir: 1,
-        lastShotTime: 0
-      });
-      setBossHealth({ current: bossHealthVal, max: bossHealthVal });
-    } else {
-      setBossHealth(null);
-      
-      // Define entry paths (Galaga style)
-      const paths = [
-        // Path 0: Loop from top left
-        Array.from({ length: 30 }, (_, i) => ({
-          x: -100 + i * 25,
-          y: 100 + Math.sin(i * 0.4) * 150
-        })),
-        // Path 1: Loop from top right
-        Array.from({ length: 30 }, (_, i) => ({
-          x: CANVAS_WIDTH + 100 - i * 25,
-          y: 150 + Math.cos(i * 0.4) * 180
-        })),
-        // Path 2: Swirl from bottom (Only for wave > 1)
-        Array.from({ length: 30 }, (_, i) => ({
-          x: CANVAS_WIDTH / 2 + Math.sin(i * 0.6) * 250,
-          y: CANVAS_HEIGHT + 100 - i * 35
-        }))
-      ];
-
-      // Wave 1 is always easier: only top entry
-      const availablePaths = waveNum === 1 ? [paths[0], paths[1]] : paths;
-
-      if (formationType === 1) {
-        // Grid
-        for (let row = 0; row < ENEMY_ROWS; row++) {
-          for (let col = 0; col < ENEMY_COLS; col++) {
-            const x = col * ENEMY_SPACING + 80;
-            const y = row * ENEMY_SPACING + 60;
-            const squadron = Math.floor((row * ENEMY_COLS + col) / 8);
-            const path = availablePaths[squadron % availablePaths.length];
-            const delay = (squadron * 1200) + ((row * ENEMY_COLS + col) % 8) * 150;
-            newEnemies.push(createEnemy(x, y, row % 3, delay, path));
-          }
-        }
-      } else if (formationType === 2) {
-        // V-shape
-        let count = 0;
-        for (let row = 0; row < 5; row++) {
-          for (let col = 0; col < 9; col++) {
-            if (row === Math.abs(col - 4)) {
-              const x = col * ENEMY_SPACING + 60;
-              const y = row * ENEMY_SPACING + 60;
-              const squadron = Math.floor(count / 8);
-              const path = availablePaths[squadron % availablePaths.length];
-              const delay = (squadron * 1200) + (count % 8) * 150;
-              newEnemies.push(createEnemy(x, y, 1, delay, path));
-              count++;
-            }
-            if (row > 1 && row - 1 === Math.abs(col - 4)) {
-              const x = col * ENEMY_SPACING + 60;
-              const y = row * ENEMY_SPACING + 60;
-              const squadron = Math.floor(count / 8);
-              const path = availablePaths[squadron % availablePaths.length];
-              const delay = (squadron * 1200) + (count % 8) * 150;
-              newEnemies.push(createEnemy(x, y, 2, delay, path));
-              count++;
-            }
-          }
-        }
-      } else if (formationType === 3) {
-        // Circle
-        const centerX = CANVAS_WIDTH / 2;
-        const centerY = 150;
-        const radiusX = 200;
-        const radiusY = 100;
-        for (let i = 0; i < 20; i++) {
-          const angle = (i / 20) * Math.PI * 2;
-          const x = centerX + Math.cos(angle) * radiusX - 17.5;
-          const y = centerY + Math.sin(angle) * radiusY - 17.5;
-          const squadron = Math.floor(i / 10);
-          const path = availablePaths[squadron % availablePaths.length];
-          const delay = (squadron * 1200) + (i % 10) * 150;
-          newEnemies.push(createEnemy(x, y, i % 3, delay, path));
-        }
-        for (let i = 0; i < 10; i++) {
-          const angle = (i / 10) * Math.PI * 2;
-          const x = centerX + Math.cos(angle) * (radiusX / 2) - 17.5;
-          const y = centerY + Math.sin(angle) * (radiusY / 2) - 17.5;
-          const squadron = Math.floor((i + 20) / 10);
-          const path = availablePaths[squadron % availablePaths.length];
-          const delay = (squadron * 1200) + (i % 10) * 150;
-          newEnemies.push(createEnemy(x, y, 0, delay, path));
-        }
+    if (stage === 1) {
+      // Tutorial: Simple Scouts
+      for (let i = 0; i < 10; i++) {
+        newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
+      }
+    } else if (stage === 2) {
+      // Asteroid Belt: No enemies, just asteroids (handled in update)
+      // But we need to spawn some "Scouts" to trigger wave clear
+      for (let i = 0; i < 5; i++) {
+        newEnemies.push(createEnemy(100 + i * 100, -100, 0));
+      }
+    } else if (stage === 3) {
+      // Heavy Fire: Snipers + Mini-boss
+      if (waveNum % 3 === 0) {
+        // Mini-boss
+        newEnemies.push({
+          ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 1),
+          width: 120, height: 100, isBoss: true, health: 1000, maxHealth: 1000,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        });
+        setBossHealth({ current: 1000, max: 1000 });
+        audio.playBossWarning();
       } else {
-        // Checkerboard / U-Shape
-        let count = 0;
-        for (let row = 0; row < 5; row++) {
-          for (let col = 0; col < 9; col++) {
-            if ((row + col) % 2 === 0) {
-              const x = col * ENEMY_SPACING + 60;
-              const y = row * ENEMY_SPACING + 60;
-              const squadron = Math.floor(count / 8);
-              const path = availablePaths[squadron % availablePaths.length];
-              const delay = (squadron * 1200) + (count % 8) * 150;
-              newEnemies.push(createEnemy(x, y, row % 3, delay, path));
-              count++;
-            }
-          }
+        for (let i = 0; i < 15; i++) {
+          newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, 1));
         }
       }
-    }
-    
-    // Add turrets for Fortress Gates
-    if (waveNum > 15) {
-      for (let i = 0; i < 4; i++) {
-        const x = (i + 1) * (CANVAS_WIDTH / 5) - 20;
-        const y = 60;
-        const turret = createEnemy(x, y, 2, 0); 
-        turret.isTurret = true;
-        turret.health = 100;
-        turret.maxHealth = 100;
-        turret.state = 'IN_FORMATION';
-        turret.width = 40;
-        turret.height = 40;
-        newEnemies.push(turret);
+    } else if (stage === 4) {
+      // Chase: Fast enemies from all sides
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * CANVAS_WIDTH;
+        const y = -Math.random() * 500;
+        newEnemies.push(createEnemy(x, y, 2));
+      }
+    } else if (stage === 5) {
+      // Final Front: Final Boss
+      if (waveNum % 3 === 0) {
+        newEnemies.push({
+          ...createEnemy(CANVAS_WIDTH / 2 - 90, 80, 2),
+          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 5000, maxHealth: 5000,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        });
+        setBossHealth({ current: 5000, max: 5000 });
+        audio.playBossWarning();
+      } else {
+        // Elite guards
+        for (let i = 0; i < 20; i++) {
+          newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, i % 3));
+        }
       }
     }
 
@@ -536,11 +459,16 @@ export default function App() {
     
     waveRef.current += 1;
     setWave(waveRef.current);
-    setSectorName(getSectorName(waveRef.current));
+    
+    const stage = Math.min(5, Math.ceil(waveRef.current / 3));
+    const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
+    setSectorName(stageNames[stage - 1]);
+    
     setDistance(prev => Math.max(0, prev - 1000));
     initEnemies(waveRef.current);
     
     setWaveTitle(true);
+    audio.playStageStart();
     setTimeout(() => setWaveTitle(false), 2000);
     
     setTimeout(() => {
@@ -576,6 +504,7 @@ export default function App() {
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
+    audio.playStageStart();
     setGameState('PLAYING');
   };
 
@@ -596,26 +525,66 @@ export default function App() {
 
     const handleTouchStart = (e: TouchEvent) => {
       if (gameState !== 'PLAYING' || showUpgrade) return;
+      e.preventDefault();
+      
+      const now = Date.now();
+      const isDoubleTap = now - lastTapTime.current < 300;
+      lastTapTime.current = now;
+
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        touchPoints.current[touch.identifier] = { x: touch.clientX, y: touch.clientY };
+      }
+
+      // Two-finger tap for Overdrive
+      if (e.touches.length >= 2) {
+        if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+          activateOverdrive();
+        }
+      }
+
       const touch = e.touches[0];
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+        const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+        setTouchFeedback({ x, y });
+      }
+
       touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-      playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+      playerStartPos.current = { x: targetPos.current.x, y: targetPos.current.y };
       isTouching.current = true;
       keysPressed.current['TouchFire'] = true;
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       if (!isTouching.current || showUpgrade) return;
+      e.preventDefault();
+      
       const touch = e.touches[0];
-      const dx = (touch.clientX - touchStartPos.current.x) * 1.5; // Sensitivity
-      const dy = (touch.clientY - touchStartPos.current.y) * 1.5;
+      const dx = (touch.clientX - touchStartPos.current.x) * 1.2;
+      const dy = (touch.clientY - touchStartPos.current.y) * 1.2;
 
-      playerPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + dx));
-      playerPos.current.y = Math.max(CANVAS_HEIGHT * 0.4, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + dy));
+      targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + dx));
+      targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + dy));
+      
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+        const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+        setTouchFeedback({ x, y });
+      }
     };
 
-    const handleTouchEnd = () => {
-      isTouching.current = false;
-      keysPressed.current['TouchFire'] = false;
+    const handleTouchEnd = (e: TouchEvent) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        delete touchPoints.current[e.changedTouches[i].identifier];
+      }
+      if (e.touches.length === 0) {
+        isTouching.current = false;
+        keysPressed.current['TouchFire'] = false;
+        setTouchFeedback(null);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown, { passive: false });
@@ -639,36 +608,81 @@ export default function App() {
     };
   }, [gameState, showUpgrade]);
 
+  const handleGraze = (x: number, y: number) => {
+    if (Date.now() % 5 !== 0) return; // Throttling
+    audio.playGraze();
+    grazeCount.current++;
+    setScore(s => s + 10);
+    
+    // Boost overdrive
+    if (!isOverdriveActive.current) {
+      overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
+      setOverdrive(overdriveGauge.current);
+    }
+
+    // Slow motion effect
+    timeScale.current = 0.8;
+
+    // Spark particles
+    for (let i = 0; i < 2; i++) {
+      particles.current.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 5,
+        vy: (Math.random() - 0.5) * 5,
+        life: 10,
+        maxLife: 10,
+        color: '#ffffff',
+        size: 1,
+        type: 'line'
+      });
+    }
+  };
+
+  const activateOverdrive = () => {
+    isOverdriveActive.current = true;
+    overdriveEndTime.current = Date.now() + 10000;
+    shake.current = 30;
+    flash.current = 0.5;
+    audio.playOverdrive();
+  };
+
   // Game Loop
   const update = () => {
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
-    // Player movement
-    let isMoving = false;
+    // Apply slow-mo recovery
+    if (timeScale.current < 1.0) {
+      timeScale.current = Math.min(1.0, timeScale.current + 0.005);
+    }
+
+    // Player movement with Lerp
     const speedMultiplier = 1 + (speedRef.current - 1) * 0.15;
     const currentSpeed = (isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
 
-    if ((keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA'] || keysPressed.current['TouchLeft']) && playerPos.current.x > 0) {
-      playerPos.current.x -= currentSpeed;
-      isMoving = true;
+    if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA'] || keysPressed.current['TouchLeft']) {
+      targetPos.current.x = Math.max(0, targetPos.current.x - currentSpeed);
     }
-    if ((keysPressed.current['ArrowRight'] || keysPressed.current['KeyD'] || keysPressed.current['TouchRight']) && playerPos.current.x < CANVAS_WIDTH - PLAYER_WIDTH) {
-      playerPos.current.x += currentSpeed;
-      isMoving = true;
+    if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD'] || keysPressed.current['TouchRight']) {
+      targetPos.current.x = Math.min(CANVAS_WIDTH - PLAYER_WIDTH, targetPos.current.x + currentSpeed);
     }
-    if ((keysPressed.current['ArrowUp'] || keysPressed.current['KeyW'] || keysPressed.current['TouchUp']) && playerPos.current.y > CANVAS_HEIGHT * 0.6) {
-      playerPos.current.y -= currentSpeed;
-      isMoving = true;
+    if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW'] || keysPressed.current['TouchUp']) {
+      targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, targetPos.current.y - currentSpeed);
     }
-    if ((keysPressed.current['ArrowDown'] || keysPressed.current['KeyS'] || keysPressed.current['TouchDown']) && playerPos.current.y < CANVAS_HEIGHT - PLAYER_HEIGHT - 20) {
-      playerPos.current.y += currentSpeed;
-      isMoving = true;
+    if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS'] || keysPressed.current['TouchDown']) {
+      targetPos.current.y = Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, targetPos.current.y + currentSpeed);
     }
 
-    // Relative Touch Movement (Drag/Swipe)
-    if (isTouching.current && !showUpgrade) {
-      isMoving = true;
-    }
+    // Lerp player position
+    const prevX = playerPos.current.x;
+    playerPos.current.x += (targetPos.current.x - playerPos.current.x) * FOLLOW_SMOOTHNESS;
+    playerPos.current.y += (targetPos.current.y - playerPos.current.y) * FOLLOW_SMOOTHNESS;
+
+    // Calculate Tilt
+    const dx = playerPos.current.x - prevX;
+    playerTilt.current = dx * 0.15;
+
+    let isMoving = Math.abs(dx) > 0.1 || Math.abs(playerPos.current.y - targetPos.current.y) > 0.1;
 
     // Add trail
     if (isMoving && Date.now() % 3 === 0) {
@@ -902,17 +916,17 @@ export default function App() {
     bullets.current = bullets.current
       .map((b) => ({ 
         ...b, 
-        x: b.x + (b.vx || 0),
-        y: b.y + (b.vy || -BULLET_SPEED) 
+        x: b.x + (b.vx || 0) * timeScale.current,
+        y: b.y + (b.vy || -BULLET_SPEED) * timeScale.current
       }))
       .filter((b) => b.y > -20 && b.y < CANVAS_HEIGHT + 20);
 
     // Update enemy bullets
-    const currentEnemyBulletSpeed = ENEMY_BULLET_SPEED + waveRef.current * 0.2;
+    const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * timeScale.current;
     enemyBullets.current = enemyBullets.current
       .map((b) => ({ 
         ...b, 
-        x: b.x + (b.vx || 0),
+        x: b.x + (b.vx || 0) * timeScale.current,
         y: b.y + (b.vy || currentEnemyBulletSpeed) 
       }))
       .filter((b) => b.y < CANVAS_HEIGHT + 20 && b.x > -20 && b.x < CANVAS_WIDTH + 20);
@@ -944,7 +958,7 @@ export default function App() {
     }
 
     // Update enemies formation
-    const currentEnemyDiveSpeed = ENEMY_DIVE_SPEED + waveRef.current * 0.2;
+    const currentEnemyDiveSpeed = (ENEMY_DIVE_SPEED + waveRef.current * 0.2) * timeScale.current;
     const formationOffset = (Math.sin(Date.now() / 1200) * 60);
     
     enemies.current.forEach((enemy) => {
@@ -952,6 +966,14 @@ export default function App() {
       
       enemy.prevX = enemy.x;
       enemy.prevY = enemy.y;
+
+      // Graze Detection
+      const edx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
+      const edy = (playerPos.current.y + PLAYER_HEIGHT / 2) - (enemy.y + enemy.height / 2);
+      const edist = Math.sqrt(edx * edx + edy * edy);
+      if (edist < GRAZE_DISTANCE + 20 && edist > 25) {
+        handleGraze(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+      }
 
       if (enemy.state === 'ENTERING') {
         if (enemy.entryDelay! > 0) {
@@ -1359,6 +1381,14 @@ export default function App() {
     });
 
     enemyBullets.current.forEach((bullet) => {
+      // Graze Detection for bullets
+      const bdx = (playerPos.current.x + PLAYER_WIDTH / 2) - bullet.x;
+      const bdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - bullet.y;
+      const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+      if (bdist < GRAZE_DISTANCE && bdist > 15) {
+        handleGraze(bullet.x, bullet.y);
+      }
+
       if (bullet.x > px && bullet.x < px + pw &&
           bullet.y > py && bullet.y < py + ph) {
         playerHit = true;
@@ -1366,6 +1396,13 @@ export default function App() {
     });
 
     if (playerHit && Date.now() > invulnerableUntil.current) {
+      // Auto-bomb if overdrive is full
+      if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+        activateOverdrive();
+        invulnerableUntil.current = Date.now() + 2000;
+        createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#ffffff', 30);
+        return;
+      }
       // Check for Shield
       if (activeEffects.current['SHIELD'] > Date.now()) {
         activeEffects.current['SHIELD'] = 0; // Consume shield
@@ -1695,10 +1732,16 @@ export default function App() {
       const warpYOffset = isWarping.current ? -warpFactor.current * 100 : 0;
       ctx.translate(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2 + warpYOffset);
       
-      // Subtle tilt
-      const tilt = (keysPressed.current['ArrowLeft'] || keysPressed.current['TouchLeft']) ? -0.15 : 
-                   (keysPressed.current['ArrowRight'] || keysPressed.current['TouchRight']) ? 0.15 : 0;
-      ctx.rotate(tilt);
+      // Dynamic tilt from Lerp
+      ctx.rotate(playerTilt.current);
+
+      // Graze Circle
+      ctx.strokeStyle = 'rgba(0, 255, 204, 0.2)';
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(0, 0, GRAZE_DISTANCE, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
       ctx.shadowBlur = 25;
       ctx.shadowColor = '#00ffcc';
@@ -2023,6 +2066,17 @@ export default function App() {
         ctx.lineTo(x, len);
         ctx.stroke();
       }
+      ctx.restore();
+    }
+
+    // Touch Feedback
+    if (touchFeedback) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 255, 204, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(touchFeedback.x, touchFeedback.y, 30, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.restore();
     }
 
