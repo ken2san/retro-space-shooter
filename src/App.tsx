@@ -49,7 +49,7 @@ interface Enemy {
   diveY: number;
   originX: number;
   originY: number;
-  diveType?: 'normal' | 'uturn' | 'zigzag' | 'sweep' | 'spread' | 'loop';
+  diveType?: 'normal' | 'uturn' | 'zigzag' | 'sweep' | 'spread' | 'loop' | 'chase';
   turnY?: number;
   diveTime?: number;
   diveStartX?: number;
@@ -62,6 +62,8 @@ interface Enemy {
   lastShotTime?: number;
   isTurret?: boolean;
   isFinalBoss?: boolean;
+  tractorBeamTimer?: number;
+  isTractorBeaming?: boolean;
   // Entry path properties
   state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING';
   path?: { x: number, y: number }[];
@@ -140,6 +142,7 @@ interface Asteroid {
   rotation: number;
   vr: number;
   hp: number;
+  vertices: number[];
 }
 
 interface Obstacle {
@@ -235,6 +238,7 @@ export default function App() {
   const obstaclePattern = useRef(0);
   const warpFactor = useRef(0);
   const warpStartTime = useRef(0);
+  const isHackedRef = useRef(false);
 
   // Initialize stars and offscreen canvas
   useEffect(() => {
@@ -350,21 +354,29 @@ export default function App() {
   const handlePlayerHit = () => {
     if (Date.now() < invulnerableUntil.current) return;
     
-    setLives(prev => {
-      const newLives = prev - 1;
-      livesRef.current = newLives;
-      if (newLives <= 0) {
-        setGameState('GAME_OVER');
-        setBossHealth(null);
-        audio.playGameOver();
-      } else {
-        audio.playPlayerHit();
-        invulnerableUntil.current = Date.now() + 2000;
-        flash.current = 1.0;
-        shake.current = 20;
-      }
-      return newLives;
-    });
+    const newLives = livesRef.current - 1;
+    livesRef.current = newLives;
+    setLives(newLives);
+    
+    // Lose wingman on hit
+    if (wingmanRef.current) {
+      setHasWingman(false);
+      wingmanRef.current = false;
+      createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
+    }
+    
+    isHackedRef.current = false; // Clear hacked state on hit
+    
+    if (newLives <= 0) {
+      setGameState('GAME_OVER');
+      setBossHealth(null);
+      audio.playGameOver();
+    } else {
+      audio.playPlayerHit();
+      invulnerableUntil.current = Date.now() + 2000;
+      flash.current = 1.0;
+      shake.current = 20;
+    }
     
     createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#00ffcc', 50);
   };
@@ -391,11 +403,12 @@ export default function App() {
     if (isBossWave) {
       audio.playBossWarning();
       if (waveNum === 6) {
-        // Mid-Boss: Alpha Scout (Upgraded)
+        // Mid-Boss: Tractor Carrier
         const boss: Enemy = {
-          ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 0),
-          width: 100, height: 80, isBoss: true, health: 1000, maxHealth: 1000,
-          phase: 1, moveDir: 1, lastShotTime: 0
+          ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 1),
+          width: 120, height: 90, isBoss: true, health: 1000, maxHealth: 1000,
+          phase: 1, moveDir: 1, lastShotTime: 0,
+          tractorBeamTimer: 0, isTractorBeaming: false
         };
         newEnemies.push(boss);
         setBossHealth({ current: 1000, max: 1000 });
@@ -403,11 +416,11 @@ export default function App() {
         // Final Boss: The Core
         const boss: Enemy = {
           ...createEnemy(CANVAS_WIDTH / 2 - 90, 80, 2),
-          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 5000, maxHealth: 5000,
+          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 3000, maxHealth: 3000,
           phase: 1, moveDir: 1, lastShotTime: 0
         };
         newEnemies.push(boss);
-        setBossHealth({ current: 5000, max: 5000 });
+        setBossHealth({ current: 3000, max: 3000 });
       }
     } else {
       // Normal Waves
@@ -436,12 +449,27 @@ export default function App() {
           newEnemies.push(turret);
         }
       } else if (stage === 4) {
-        // Chase: Fast scouts
+        // Chase: Fast scouts from sides and bottom
         for (let i = 0; i < 15; i++) {
-          const x = Math.random() * CANVAS_WIDTH;
-          const y = -Math.random() * 500;
+          const side = Math.floor(Math.random() * 3); // 0: left, 1: right, 2: bottom
+          let x = 0, y = 0;
+          let diveX = 0, diveY = 0;
+          if (side === 0) { 
+            x = -50; y = Math.random() * CANVAS_HEIGHT; 
+            diveX = 5; diveY = (Math.random() - 0.5) * 2;
+          } else if (side === 1) { 
+            x = CANVAS_WIDTH + 50; y = Math.random() * CANVAS_HEIGHT; 
+            diveX = -5; diveY = (Math.random() - 0.5) * 2;
+          } else { 
+            x = Math.random() * CANVAS_WIDTH; y = CANVAS_HEIGHT + 50; 
+            diveX = (Math.random() - 0.5) * 2; diveY = -5;
+          }
           const enemy = createEnemy(x, y, 2);
-          enemy.state = 'DIVING'; // Always diving in chase
+          enemy.state = 'DIVING';
+          enemy.isDiving = true;
+          enemy.diveX = diveX;
+          enemy.diveY = diveY;
+          enemy.diveType = 'chase';
           newEnemies.push(enemy);
         }
       } else if (stage === 5) {
@@ -512,6 +540,7 @@ export default function App() {
     waveRef.current = 1;
     setHasWingman(false);
     wingmanRef.current = false;
+    isHackedRef.current = false;
     invulnerableUntil.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     bullets.current = [];
@@ -702,6 +731,7 @@ export default function App() {
 
       // Wingman collision with enemy bullets
       enemyBullets.current.forEach((bullet, idx) => {
+        if (!wingmanRef.current) return;
         const dx = bullet.x - (wingmanPos.current.x + PLAYER_WIDTH / 2);
         const dy = bullet.y - (wingmanPos.current.y + PLAYER_HEIGHT / 2);
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -713,6 +743,29 @@ export default function App() {
           wingmanRef.current = false;
         }
       });
+
+      // Wingman collision with enemies
+      if (wingmanRef.current) {
+        enemies.current.forEach((enemy) => {
+          if (!wingmanRef.current) return;
+          if (enemy.alive &&
+              enemy.x < wingmanPos.current.x + PLAYER_WIDTH &&
+              enemy.x + enemy.width > wingmanPos.current.x &&
+              enemy.y < wingmanPos.current.y + PLAYER_HEIGHT &&
+              enemy.y + enemy.height > wingmanPos.current.y) {
+            createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
+            audio.playExplosion(wingmanPos.current.x);
+            setHasWingman(false);
+            wingmanRef.current = false;
+            // Also damage the enemy slightly
+            enemy.health! -= 50;
+            if (enemy.health! <= 0) {
+              enemy.alive = false;
+              createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 50);
+            }
+          }
+        });
+      }
     }
 
     // Player movement with Lerp
@@ -804,16 +857,23 @@ export default function App() {
     scraps.current = scraps.current.filter(s => s.y < CANVAS_HEIGHT && s.life > 0);
 
     // Update Asteroids
-    const isAsteroidBelt = sectorName.includes('Asteroid Belt');
+    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const isAsteroidBelt = currentStage === 2;
     if (isAsteroidBelt && !isWarping.current && Math.random() < 0.02) {
+      const size = isAsteroidBelt ? Math.random() * 80 + 60 : Math.random() * 40 + 20;
+      const vertices = [];
+      for (let i = 0; i < 8; i++) {
+        vertices.push(0.8 + Math.random() * 0.4);
+      }
       asteroids.current.push({
         x: Math.random() * CANVAS_WIDTH,
-        y: -100,
-        size: Math.random() * 40 + 20,
+        y: -150,
+        size: size,
         speed: Math.random() * 2 + 1,
         rotation: Math.random() * Math.PI * 2,
         vr: (Math.random() - 0.5) * 0.05,
-        hp: isAsteroidBelt ? 9999 : 3 // Indestructible in belt
+        hp: isAsteroidBelt ? 9999 : 3, // Indestructible in belt
+        vertices: vertices
       });
     }
     
@@ -828,6 +888,20 @@ export default function App() {
       if (dist < a.size * 0.8 && Date.now() > invulnerableUntil.current) {
         handlePlayerHit();
         if (!isAsteroidBelt) a.hp = 0; // Destroy asteroid if not in belt
+      }
+      
+      // Collision with wingman
+      if (wingmanRef.current) {
+        const wdx = (wingmanPos.current.x + PLAYER_WIDTH / 2) - a.x;
+        const wdy = (wingmanPos.current.y + PLAYER_HEIGHT / 2) - a.y;
+        const wdist = Math.sqrt(wdx * wdx + wdy * wdy);
+        if (wdist < a.size * 0.8) {
+          setHasWingman(false);
+          wingmanRef.current = false;
+          createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
+          audio.playExplosion(wingmanPos.current.x);
+          if (!isAsteroidBelt) a.hp = 0;
+        }
       }
       
       // Collision with bullets
@@ -849,7 +923,7 @@ export default function App() {
     asteroids.current = asteroids.current.filter(a => a.y < CANVAS_HEIGHT + 100 && a.hp > 0);
 
     // Update Obstacles (Sector 16+: Fortress Gates & The Core)
-    if ((sectorName === 'Fortress Gates' || sectorName === 'The Core') && !isWarping.current) {
+    if (currentStage === 5 && !isWarping.current) {
       const now = Date.now();
       if (now - lastObstacleTime.current > 3000) {
         lastObstacleTime.current = now;
@@ -885,6 +959,19 @@ export default function App() {
       if (px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
           py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height && Date.now() > invulnerableUntil.current) {
         handlePlayerHit();
+      }
+      
+      // Collision with wingman
+      if (wingmanRef.current) {
+        const wx = wingmanPos.current.x;
+        const wy = wingmanPos.current.y;
+        if (wx + PLAYER_WIDTH > obs.x && wx < obs.x + obs.width &&
+            wy + PLAYER_HEIGHT > obs.y && wy < obs.y + obs.height) {
+          setHasWingman(false);
+          wingmanRef.current = false;
+          createExplosion(wx + PLAYER_WIDTH / 2, wy + PLAYER_HEIGHT / 2, '#ff33cc', 30);
+          audio.playExplosion(wx);
+        }
       }
       
       // Collision with bullets
@@ -1082,16 +1169,38 @@ export default function App() {
 
       // Boss Logic
       if (enemy.isBoss) {
-        const stage = Math.min(5, Math.ceil(waveRef.current / 3));
+        const stage = Math.min(5, Math.ceil(waveRef.current / 2));
         
         if (enemy.y < enemy.originY) {
           enemy.y += 1; // Entry
         } else {
           // Horizontal movement
-          const moveSpeed = stage === 4 ? 4 : 1.5; // Speed Demon is faster
-          enemy.x += (enemy.moveDir || 1) * moveSpeed;
-          if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
-            enemy.moveDir = (enemy.moveDir || 1) * -1;
+          let moveSpeed = stage === 4 ? 4 : 1.5; // Speed Demon is faster
+          
+          // Final Boss Phase 3 Dash
+          if (stage === 5 && enemy.phase === 3) {
+            const now = Date.now();
+            if (!enemy.diveStartX) {
+              enemy.diveStartX = now; // Use as timer
+            }
+            const dashTime = now - enemy.diveStartX;
+            if (dashTime < 1000) {
+              moveSpeed = 0; // Stop and aim
+              enemy.diveX = playerPos.current.x - enemy.width / 2;
+            } else if (dashTime < 1500) {
+              enemy.y += 15; // Dash down
+              enemy.x += (enemy.diveX - enemy.x) * 0.1;
+            } else if (dashTime < 2500) {
+              enemy.y -= 5; // Return
+            } else {
+              enemy.diveStartX = 0; // Reset
+              enemy.y = enemy.originY;
+            }
+          } else {
+            enemy.x += (enemy.moveDir || 1) * moveSpeed;
+            if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
+              enemy.moveDir = (enemy.moveDir || 1) * -1;
+            }
           }
 
           // Phase logic
@@ -1103,78 +1212,92 @@ export default function App() {
           let shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
           if (stage === 5) shootInterval *= 0.7; // Final boss fires faster
           
+          if (stage === 3) {
+            // Mid-Boss Tractor Beam Logic
+            if (!enemy.isTractorBeaming) {
+              if (now - (enemy.tractorBeamTimer || 0) > 5000) {
+                enemy.isTractorBeaming = true;
+                enemy.tractorBeamTimer = now;
+              }
+            } else {
+              if (now - (enemy.tractorBeamTimer || 0) > 2000) {
+                enemy.isTractorBeaming = false;
+                enemy.tractorBeamTimer = now;
+              } else {
+                // Check collision with player
+                const beamWidth = 80;
+                const beamX = enemy.x + enemy.width / 2 - beamWidth / 2;
+                const beamY = enemy.y + enemy.height;
+                const beamHeight = CANVAS_HEIGHT;
+                
+                const px = playerPos.current.x;
+                const py = playerPos.current.y;
+                
+                if (px < beamX + beamWidth && px + PLAYER_WIDTH > beamX &&
+                    py < beamY + beamHeight && py + PLAYER_HEIGHT > beamY) {
+                  isHackedRef.current = true;
+                }
+              }
+            }
+          }
+          
           if (now - (enemy.lastShotTime || 0) > shootInterval) {
             enemy.lastShotTime = now;
             audio.playEnemyShoot(enemy.x + enemy.width / 2);
 
-            if (stage === 1) {
-              // Alpha Scout: Simple spread
-              for (let i = -2; i <= 2; i++) {
-                enemyBullets.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height,
-                  vx: i * 0.8,
-                  vy: 3
-                });
-              }
-            } else if (stage === 2) {
-              // Asteroid Mother: Circular burst + Spawns mini-asteroids
-              for (let i = 0; i < 8; i++) {
-                const angle = (i / 8) * Math.PI * 2;
-                enemyBullets.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height / 2,
-                  vx: Math.cos(angle) * 2,
-                  vy: Math.sin(angle) * 2
-                });
-              }
-              // Spawn asteroid
-              if (Math.random() > 0.5) {
-                asteroids.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height / 2,
-                  size: 20 + Math.random() * 20,
-                  speed: 2 + Math.random() * 2,
-                  hp: 2,
-                  rotation: Math.random() * Math.PI * 2,
-                  rotSpeed: (Math.random() - 0.5) * 0.1
-                });
-              }
-            } else if (stage === 3) {
-              // Sniper Carrier: Homing lasers
-              const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
-              const dy = playerPos.current.y - (enemy.y + enemy.height);
-              const dist = Math.sqrt(dx * dx + dy * dy);
-              for (let i = -1; i <= 1; i++) {
-                enemyBullets.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height,
-                  vx: (dx / dist) * 4 + i * 0.3,
-                  vy: (dy / dist) * 4,
-                  isHoming: true
-                });
-              }
-            } else if (stage === 4) {
-              // Speed Demon: Fast dash + Bullet trail
-              enemy.moveDir = (enemy.moveDir || 1) * 1.05; // Accelerate
-              for (let i = 0; i < 3; i++) {
-                enemyBullets.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height / 2,
-                  vx: (Math.random() - 0.5) * 2,
-                  vy: 2
-                });
+            if (stage === 3) {
+              // Mid-Boss: Tractor Carrier
+              // Fires simple aimed shots while not tractor beaming
+              if (!enemy.isTractorBeaming) {
+                const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
+                const dy = playerPos.current.y - (enemy.y + enemy.height);
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                for (let i = -1; i <= 1; i++) {
+                  enemyBullets.current.push({
+                    x: enemy.x + enemy.width / 2,
+                    y: enemy.y + enemy.height,
+                    vx: (dx / dist) * 4 + i * 0.5,
+                    vy: (dy / dist) * 4
+                  });
+                }
               }
             } else if (stage === 5) {
-              // The Core: Bullet Hell
-              for (let i = 0; i < 16; i++) {
-                const angle = (i / 16) * Math.PI * 2 + (now / 500);
-                enemyBullets.current.push({
-                  x: enemy.x + enemy.width / 2,
-                  y: enemy.y + enemy.height / 2,
-                  vx: Math.cos(angle) * 3,
-                  vy: Math.sin(angle) * 3
-                });
+              // The Core: Multi-phase Bullet Hell
+              if (enemy.phase === 1) {
+                // Normal aimed spread
+                const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
+                const dy = playerPos.current.y - (enemy.y + enemy.height);
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                for (let i = -2; i <= 2; i++) {
+                  enemyBullets.current.push({
+                    x: enemy.x + enemy.width / 2,
+                    y: enemy.y + enemy.height,
+                    vx: (dx / dist) * 3 + i * 0.5,
+                    vy: (dy / dist) * 3
+                  });
+                }
+              } else if (enemy.phase === 2) {
+                // Spiral
+                for (let i = 0; i < 4; i++) {
+                  const angle = (now / 200) + (i * Math.PI / 2);
+                  enemyBullets.current.push({
+                    x: enemy.x + enemy.width / 2,
+                    y: enemy.y + enemy.height / 2,
+                    vx: Math.cos(angle) * 3,
+                    vy: Math.sin(angle) * 3
+                  });
+                }
+              } else if (enemy.phase === 3) {
+                // Ring burst
+                for (let i = 0; i < 12; i++) {
+                  const angle = (i / 12) * Math.PI * 2;
+                  enemyBullets.current.push({
+                    x: enemy.x + enemy.width / 2,
+                    y: enemy.y + enemy.height / 2,
+                    vx: Math.cos(angle) * 4,
+                    vy: Math.sin(angle) * 4
+                  });
+                }
               }
             }
           }
@@ -1244,6 +1367,9 @@ export default function App() {
           
           enemy.x = (enemy.diveStartX || enemy.originX) + (enemy.diveX || 0) * t + offsetX;
           enemy.y = currentY + offsetY;
+        } else if (enemy.diveType === 'chase') {
+          enemy.x += enemy.diveX || 0;
+          enemy.y += enemy.diveY || 0;
         } else {
           enemy.y += currentEnemyDiveSpeed;
           
@@ -1262,6 +1388,12 @@ export default function App() {
           enemy.isDiving = false;
           enemy.isReturning = true;
           enemy.state = 'RETURNING';
+        } else if (enemy.diveType === 'chase') {
+          // Wrap around
+          if (enemy.x < -100) enemy.x = CANVAS_WIDTH + 50;
+          if (enemy.x > CANVAS_WIDTH + 100) enemy.x = -50;
+          if (enemy.y < -100) enemy.y = CANVAS_HEIGHT + 50;
+          if (enemy.y > CANVAS_HEIGHT + 100) enemy.y = -50;
         } else if (enemy.y > CANVAS_HEIGHT) {
           enemy.y = -40;
           enemy.isDiving = false;
@@ -1364,11 +1496,12 @@ export default function App() {
               setBossHealth(null);
               setScore(s => s + 5000 * (waveRef.current / 5));
               
-              // Reward Wingman on Stage 2 Boss defeat
-              if (Math.ceil(waveRef.current / 3) === 2) {
+              // Reward Dual Fighter if hacked by Mid-Boss
+              if (waveRef.current === 6 && isHackedRef.current) {
                 setHasWingman(true);
                 wingmanRef.current = true;
                 wingmanPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+                isHackedRef.current = false; // Clear hack status
               }
               
               if (enemy.isFinalBoss) {
@@ -1668,7 +1801,8 @@ export default function App() {
     }
 
     // Parallax Starfield
-    const isChase = sectorName.includes('Chase');
+    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const isChase = currentStage === 4;
     stars.current.forEach(s => {
       const speedMult = (1 + warpFactor.current * 40) * (isChase ? 3 : 1);
       s.y += s.speed * speedMult;
@@ -1737,18 +1871,32 @@ export default function App() {
       ctx.translate(a.x, a.y);
       ctx.rotate(a.rotation);
       ctx.shadowBlur = 10;
-      ctx.shadowColor = '#555';
-      ctx.strokeStyle = '#888';
-      ctx.lineWidth = 2;
+      ctx.shadowColor = a.hp > 1000 ? '#ffcc00' : '#555';
+      ctx.strokeStyle = a.hp > 1000 ? '#ffcc00' : '#888';
+      ctx.lineWidth = a.hp > 1000 ? 3 : 2;
       ctx.beginPath();
       for (let i = 0; i < 8; i++) {
         const angle = (i / 8) * Math.PI * 2;
-        const r = a.size * (0.8 + Math.random() * 0.4);
+        const r = a.size * (a.vertices ? a.vertices[i] : 1);
         if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
         else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
       }
       ctx.closePath();
       ctx.stroke();
+      
+      // Inner wireframe for indestructible asteroids
+      if (a.hp > 1000) {
+        ctx.beginPath();
+        for (let i = 0; i < 8; i+=2) {
+          const angle = (i / 8) * Math.PI * 2;
+          const r = a.size * (a.vertices ? a.vertices[i] : 1);
+          if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+          else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+      
       ctx.restore();
     });
 
@@ -1866,8 +2014,16 @@ export default function App() {
       // Dynamic tilt from Lerp
       ctx.rotate(playerTilt.current);
 
+      // Hacked Glitch Effect
+      if (isHackedRef.current) {
+        const glitchOffset = (Math.random() - 0.5) * 10;
+        ctx.translate(glitchOffset, 0);
+        ctx.strokeStyle = Math.random() > 0.5 ? '#ff00ff' : '#00ffff';
+        ctx.shadowColor = ctx.strokeStyle;
+      }
+
       // Graze Circle
-      ctx.strokeStyle = 'rgba(0, 255, 204, 0.2)';
+      ctx.strokeStyle = isHackedRef.current ? 'rgba(255, 0, 255, 0.2)' : 'rgba(0, 255, 204, 0.2)';
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
       ctx.arc(0, 0, GRAZE_DISTANCE, 0, Math.PI * 2);
@@ -1875,8 +2031,10 @@ export default function App() {
       ctx.setLineDash([]);
 
       ctx.shadowBlur = 25;
-      ctx.shadowColor = '#00ffcc';
-      ctx.strokeStyle = '#00ffcc';
+      if (!isHackedRef.current) {
+        ctx.shadowColor = '#00ffcc';
+        ctx.strokeStyle = '#00ffcc';
+      }
       ctx.lineWidth = 2.5;
       
       // High-End Neon Vector Ship
@@ -1928,19 +2086,24 @@ export default function App() {
     if (hasWingman) {
       ctx.save();
       ctx.translate(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
-      ctx.scale(0.7, 0.7); // Smaller
+      ctx.scale(0.8, 0.8); // Slightly smaller
       
       const color = '#ff33cc';
       ctx.strokeStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 15;
       ctx.lineWidth = 2;
 
+      // High-End Neon Vector Ship (Wingman)
       ctx.beginPath();
-      ctx.moveTo(0, -PLAYER_HEIGHT / 2);
-      ctx.lineTo(PLAYER_WIDTH / 2, PLAYER_HEIGHT / 2);
-      ctx.lineTo(0, PLAYER_HEIGHT / 4);
-      ctx.lineTo(-PLAYER_WIDTH / 2, PLAYER_HEIGHT / 2);
+      ctx.moveTo(0, -PLAYER_HEIGHT/2); // Nose
+      ctx.lineTo(8, -10);
+      ctx.lineTo(PLAYER_WIDTH/2, PLAYER_HEIGHT/2 - 5); // Right Wing Tip
+      ctx.lineTo(5, PLAYER_HEIGHT/2 - 10);
+      ctx.lineTo(0, PLAYER_HEIGHT/2 - 5); // Tail center
+      ctx.lineTo(-5, PLAYER_HEIGHT/2 - 10);
+      ctx.lineTo(-PLAYER_WIDTH/2, PLAYER_HEIGHT/2 - 5); // Left Wing Tip
+      ctx.lineTo(-8, -10);
       ctx.closePath();
       ctx.stroke();
       
@@ -2019,6 +2182,36 @@ export default function App() {
           ctx.beginPath();
           ctx.arc(0, 0, 40, 0, Math.PI * 2);
           ctx.stroke();
+        }
+
+        // Tractor Beam Rendering
+        if (enemy.isTractorBeaming) {
+          ctx.save();
+          const beamWidth = 100 + Math.sin(Date.now() / 50) * 20;
+          const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+          gradient.addColorStop(0, 'rgba(0, 255, 255, 0.8)');
+          gradient.addColorStop(1, 'rgba(0, 255, 255, 0.1)');
+          
+          ctx.fillStyle = gradient;
+          ctx.shadowColor = '#00ffff';
+          ctx.shadowBlur = 20;
+          ctx.beginPath();
+          ctx.moveTo(-20, enemy.height / 2);
+          ctx.lineTo(20, enemy.height / 2);
+          ctx.lineTo(beamWidth / 2, CANVAS_HEIGHT);
+          ctx.lineTo(-beamWidth / 2, CANVAS_HEIGHT);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Add some scanning lines inside the beam
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 2;
+          const scanY = (Date.now() % 1000) / 1000 * CANVAS_HEIGHT;
+          ctx.beginPath();
+          ctx.moveTo(-beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
+          ctx.lineTo(beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
+          ctx.stroke();
+          ctx.restore();
         }
 
         ctx.restore();
@@ -2168,8 +2361,8 @@ export default function App() {
 
     ctx.restore(); // Restore from shake
 
-    // Nebula Pass Effect
-    if (sectorName === 'Nebula Pass') {
+    // Nebula Pass Effect (Stage 3: Heavy Fire)
+    if (currentStage === 3) {
       ctx.save();
       const time = Date.now() / 2000;
       const nebulaGradient = ctx.createRadialGradient(
@@ -2506,8 +2699,8 @@ export default function App() {
                   className="absolute -top-6 left-0 h-[2px] bg-gradient-to-r from-transparent via-[#00ffcc] to-transparent"
                 />
                 <div className="relative">
-                  <h2 className={`text-5xl md:text-7xl font-black tracking-[0.3em] italic drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${wave % 3 === 0 ? 'text-[#ff3366]' : 'text-white'}`}>
-                    {wave % 3 === 0 ? 'BOSS BATTLE' : `STAGE ${Math.ceil(wave / 3)}-${((wave - 1) % 3) + 1}`}
+                  <h2 className={`text-5xl md:text-7xl font-black tracking-[0.3em] italic drop-shadow-[0_0_30px_rgba(255,255,255,0.8)] ${(wave === 6 || wave === 10) ? 'text-[#ff3366]' : 'text-white'}`}>
+                    {(wave === 6 || wave === 10) ? 'BOSS BATTLE' : `STAGE ${Math.min(5, Math.ceil(wave / 2))}-${wave % 2 === 0 ? 2 : 1}`}
                   </h2>
                   <p className="text-[#00ffcc] text-xs mt-2 tracking-[0.5em] font-bold uppercase">{sectorName}</p>
                   {/* Glitch clones for stylish effect */}
@@ -2516,14 +2709,14 @@ export default function App() {
                     transition={{ duration: 0.1, repeat: Infinity }}
                     className="absolute inset-0 text-5xl md:text-7xl font-black tracking-[0.3em] italic text-[#00ffcc] -z-10 translate-x-1"
                   >
-                    {wave % 3 === 0 ? 'BOSS BATTLE' : `STAGE ${Math.ceil(wave / 3)}-${((wave - 1) % 3) + 1}`}
+                    {(wave === 6 || wave === 10) ? 'BOSS BATTLE' : `STAGE ${Math.min(5, Math.ceil(wave / 2))}-${wave % 2 === 0 ? 2 : 1}`}
                   </motion.h2>
                   <motion.h2 
                     animate={{ x: [2, -2, 2], opacity: [0.3, 0.1, 0.3] }}
                     transition={{ duration: 0.1, repeat: Infinity }}
                     className="absolute inset-0 text-5xl md:text-7xl font-black tracking-[0.3em] italic text-[#ff3366] -z-10 -translate-x-1"
                   >
-                    {wave % 3 === 0 ? 'BOSS BATTLE' : `STAGE ${Math.ceil(wave / 3)}-${((wave - 1) % 3) + 1}`}
+                    {(wave === 6 || wave === 10) ? 'BOSS BATTLE' : `STAGE ${Math.min(5, Math.ceil(wave / 2))}-${wave % 2 === 0 ? 2 : 1}`}
                   </motion.h2>
                 </div>
                 <motion.div
