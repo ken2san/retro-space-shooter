@@ -5,27 +5,57 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
     <script>
-      // Intercept Vite's WebSocket to prevent automatic page reloads
-      const OriginalWebSocket = window.WebSocket;
-      window.WebSocket = function(url, protocols) {
-        const ws = new OriginalWebSocket(url, protocols);
-        if (url.includes('vite')) {
-          const originalAddEventListener = ws.addEventListener.bind(ws);
-          ws.addEventListener = function(type, listener, options) {
-            if (type === 'message' || type === 'close') {
-              console.log('Blocked Vite WebSocket event:', type);
-              return;
+      // Aggressively block Vite's automatic page reloads
+      (function() {
+        // 1. Intercept WebSocket to block reload messages
+        const OriginalWebSocket = window.WebSocket;
+        window.WebSocket = function(url, protocols) {
+          const ws = new OriginalWebSocket(url, protocols);
+          if (typeof url === 'string' && url.includes('vite')) {
+            const originalAddEventListener = ws.addEventListener.bind(ws);
+            ws.addEventListener = function(type, listener, options) {
+              if (type === 'message' || type === 'close') {
+                console.log('Blocked Vite WebSocket event:', type);
+                return;
+              }
+              return originalAddEventListener(type, listener, options);
+            };
+          }
+          return ws;
+        };
+        Object.assign(window.WebSocket, OriginalWebSocket);
+        window.WebSocket.prototype = OriginalWebSocket.prototype;
+
+        // 2. Block location.reload and location.replace
+        // Note: We can't fully block location.reload as it's non-configurable in some browsers,
+        // but we can try to override it or at least catch calls.
+        try {
+          const originalReload = window.location.reload;
+          Object.defineProperty(window.location, 'reload', {
+            configurable: false,
+            writable: false,
+            value: function() {
+              console.warn("Blocked a location.reload() call.");
             }
-            return originalAddEventListener(type, listener, options);
+          });
+        } catch (e) {
+          // Fallback if location is not configurable
+          window.onbeforeunload = function() {
+            console.log("Preventing page unload...");
+            return "Are you sure you want to leave? (Blocked Vite reload)";
           };
         }
-        return ws;
-      };
-      window.WebSocket.prototype = OriginalWebSocket.prototype;
-      window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
-      window.WebSocket.OPEN = OriginalWebSocket.OPEN;
-      window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
-      window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
+
+        // 3. Block history navigation if used for reload
+        const originalReplaceState = window.history.replaceState;
+        window.history.replaceState = function() {
+          if (arguments[2] === window.location.href) {
+            console.log("Blocked history.replaceState reload attempt");
+            return;
+          }
+          return originalReplaceState.apply(this, arguments);
+        };
+      })();
     </script>
   </head>
   <body>

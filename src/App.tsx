@@ -99,6 +99,12 @@ export default function App() {
   const lastShotTime = useRef(0);
   const lastDiveTime = useRef(0);
   const requestRef = useRef<number>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
+  // Detect touch device
+  useEffect(() => {
+    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
 
   // Load assets on mount
   useEffect(() => {
@@ -249,11 +255,11 @@ export default function App() {
 
     // Player movement
     let isMoving = false;
-    if (keysPressed.current['ArrowLeft'] && playerPos.current.x > 0) {
+    if ((keysPressed.current['ArrowLeft'] || keysPressed.current['TouchLeft']) && playerPos.current.x > 0) {
       playerPos.current.x -= PLAYER_SPEED;
       isMoving = true;
     }
-    if (keysPressed.current['ArrowRight'] && playerPos.current.x < CANVAS_WIDTH - PLAYER_WIDTH) {
+    if ((keysPressed.current['ArrowRight'] || keysPressed.current['TouchRight']) && playerPos.current.x < CANVAS_WIDTH - PLAYER_WIDTH) {
       playerPos.current.x += PLAYER_SPEED;
       isMoving = true;
     }
@@ -281,7 +287,7 @@ export default function App() {
     if (flash.current < 0) flash.current = 0;
 
     // Shooting
-    if (keysPressed.current['Space']) {
+    if (keysPressed.current['Space'] || keysPressed.current['TouchFire']) {
       const now = Date.now();
       if (now - lastShotTime.current > 250) {
         bullets.current.push({
@@ -748,7 +754,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#020205] text-white flex flex-col items-center justify-center font-mono overflow-hidden">
       {/* HUD */}
-      <div className="w-[600px] flex justify-between items-end mb-4 px-4">
+      <div className="w-full max-w-[600px] flex justify-between items-end mb-4 px-4">
         <div className="flex flex-col">
           <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Score</span>
           <span className="text-2xl font-bold text-[#00ffcc] tracking-tighter">{score.toString().padStart(6, '0')}</span>
@@ -772,16 +778,53 @@ export default function App() {
       </div>
 
       {/* Game Canvas Container */}
-      <div className="relative border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_50px_rgba(0,255,204,0.1)] overflow-hidden">
+      <div className="relative border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_50px_rgba(0,255,204,0.1)] overflow-hidden max-w-full max-h-[70vh] aspect-[3/4]">
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
-          className="block"
+          className="block w-full h-full object-contain"
         />
 
         {/* Overlay Screens */}
         <AnimatePresence>
+          {/* Mobile Controls */}
+          {gameState === 'PLAYING' && isTouchDevice && (
+            <div className="absolute inset-0 pointer-events-none select-none">
+              {/* Left/Right Buttons */}
+              <div className="absolute bottom-4 left-4 flex gap-2 pointer-events-auto">
+                <button
+                  onPointerDown={() => keysPressed.current['TouchLeft'] = true}
+                  onPointerUp={() => keysPressed.current['TouchLeft'] = false}
+                  onPointerLeave={() => keysPressed.current['TouchLeft'] = false}
+                  className="w-16 h-16 bg-white/10 border-2 border-[#00ffcc]/30 rounded-full flex items-center justify-center active:bg-[#00ffcc]/40 active:scale-95 transition-all"
+                >
+                  <div className="w-0 h-0 border-t-[10px] border-t-transparent border-r-[20px] border-r-[#00ffcc] border-b-[10px] border-b-transparent" />
+                </button>
+                <button
+                  onPointerDown={() => keysPressed.current['TouchRight'] = true}
+                  onPointerUp={() => keysPressed.current['TouchRight'] = false}
+                  onPointerLeave={() => keysPressed.current['TouchRight'] = false}
+                  className="w-16 h-16 bg-white/10 border-2 border-[#00ffcc]/30 rounded-full flex items-center justify-center active:bg-[#00ffcc]/40 active:scale-95 transition-all"
+                >
+                  <div className="w-0 h-0 border-t-[10px] border-t-transparent border-l-[20px] border-l-[#00ffcc] border-b-[10px] border-b-transparent" />
+                </button>
+              </div>
+              
+              {/* Fire Button */}
+              <div className="absolute bottom-4 right-4 pointer-events-auto">
+                <button
+                  onPointerDown={() => keysPressed.current['TouchFire'] = true}
+                  onPointerUp={() => keysPressed.current['TouchFire'] = false}
+                  onPointerLeave={() => keysPressed.current['TouchFire'] = false}
+                  className="w-20 h-20 bg-[#ff3366]/20 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/60 active:scale-90 shadow-[0_0_20px_rgba(255,51,102,0.2)]"
+                >
+                  <div className="w-6 h-6 bg-[#ff3366] rounded-sm rotate-45" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {gameState === 'LOADING' && (
             <motion.div
               initial={{ opacity: 0 }}
