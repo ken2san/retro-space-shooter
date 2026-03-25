@@ -176,6 +176,24 @@ class RetroAudio {
     osc.stop(this.ctx.currentTime + 0.1);
   }
 
+  playWarp() {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    
+    osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(2000, this.ctx.currentTime + 1.5);
+    
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.5);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 1.5);
+  }
+
   playBGM() {
     if (!this.ctx) return;
     this.stopBGM(); // Prevent overlapping

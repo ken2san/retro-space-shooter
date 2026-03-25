@@ -151,6 +151,11 @@ export default function App() {
   const isOverdriveActive = useRef(false);
   const overdriveEndTime = useRef(0);
 
+  // Warp Transition State
+  const isWarping = useRef(false);
+  const warpFactor = useRef(0);
+  const warpStartTime = useRef(0);
+
   // Initialize stars
   useEffect(() => {
     stars.current = Array.from({ length: 100 }, () => ({
@@ -904,15 +909,41 @@ export default function App() {
     particles.current = particles.current.filter(p => p.life > 0);
 
     const aliveEnemies = enemies.current.filter(e => e.alive);
-    if (aliveEnemies.length === 0) {
-      waveRef.current += 1;
-      setWave(waveRef.current);
-      initEnemies(waveRef.current);
+    if (aliveEnemies.length === 0 && !isWarping.current) {
+      isWarping.current = true;
+      warpStartTime.current = Date.now();
+      audio.playWarp();
       
-      // Wave title effect
-      const isBossWave = waveRef.current % 5 === 0;
-      setWaveTitle(true);
-      setTimeout(() => setWaveTitle(false), 2000);
+      // Clear bullets
+      bullets.current = [];
+      enemyBullets.current = [];
+
+      setTimeout(() => {
+        waveRef.current += 1;
+        setWave(waveRef.current);
+        initEnemies(waveRef.current);
+        
+        // Wave title effect
+        setWaveTitle(true);
+        setTimeout(() => setWaveTitle(false), 2000);
+        
+        // End warp after a bit more time
+        setTimeout(() => {
+          isWarping.current = false;
+        }, 1000);
+      }, 1500);
+    }
+
+    // Update Warp Factor
+    if (isWarping.current) {
+      const elapsed = Date.now() - warpStartTime.current;
+      if (elapsed < 1500) {
+        warpFactor.current = Math.min(1, warpFactor.current + 0.05);
+      } else {
+        warpFactor.current = Math.max(0, warpFactor.current - 0.02);
+      }
+    } else {
+      warpFactor.current = Math.max(0, warpFactor.current - 0.05);
     }
 
     if (aliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && !e.isDiving && !e.isReturning)) {
@@ -937,22 +968,43 @@ export default function App() {
 
     // Parallax Starfield
     stars.current.forEach(s => {
-      s.y += s.speed;
+      const speedMult = 1 + warpFactor.current * 40;
+      s.y += s.speed * speedMult;
       if (s.y > CANVAS_HEIGHT) {
         s.y = -10;
         s.x = Math.random() * CANVAS_WIDTH;
       }
       ctx.fillStyle = `rgba(255, 255, 255, ${s.opacity})`;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-      ctx.fill();
+      
+      if (warpFactor.current > 0.1) {
+        // Stretched stars during warp
+        ctx.strokeStyle = `rgba(255, 255, 255, ${s.opacity * warpFactor.current})`;
+        ctx.lineWidth = s.size;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x, s.y - s.size * 20 * warpFactor.current);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     });
 
     // Grid (Perspective effect)
-    ctx.strokeStyle = 'rgba(0, 255, 204, 0.05)';
+    const isBossNear = (waveRef.current + 1) % 5 === 0;
+    const isBossWave = waveRef.current % 5 === 0;
+    
+    let baseGridColor = 'rgba(0, 255, 204, 0.05)';
+    if (isBossWave) baseGridColor = 'rgba(255, 51, 102, 0.1)';
+    else if (isBossNear) baseGridColor = 'rgba(255, 204, 0, 0.08)';
+
+    const gridColor = isWarping.current ? `rgba(255, 51, 102, ${0.1 + warpFactor.current * 0.3})` : baseGridColor;
+    ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
     const gridSpacing = 40;
-    const gridOffset = (Date.now() / 20) % gridSpacing;
+    const gridSpeed = isWarping.current ? 100 : 20;
+    const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
     for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -1011,7 +1063,10 @@ export default function App() {
     
     if (!isInvulnerable || blink) {
       ctx.save();
-      ctx.translate(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2);
+      
+      // Warp movement
+      const warpYOffset = isWarping.current ? -warpFactor.current * 100 : 0;
+      ctx.translate(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2 + warpYOffset);
       
       // Subtle tilt
       const tilt = (keysPressed.current['ArrowLeft'] || keysPressed.current['TouchLeft']) ? -0.15 : 
@@ -1244,6 +1299,22 @@ export default function App() {
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       flash.current *= 0.9;
     }
+
+    // Speed Lines Overlay (Warp)
+    if (warpFactor.current > 0.3) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${warpFactor.current * 0.2})`;
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * CANVAS_WIDTH;
+        const len = Math.random() * 200 * warpFactor.current;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, len);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   };
 
   const loop = () => {
@@ -1465,53 +1536,52 @@ export default function App() {
 
       {/* Mobile Control Pad (Outside Canvas) */}
       {gameState === 'PLAYING' && isTouchDevice && (
-        <div className="w-full max-w-[600px] mt-8 px-6 flex justify-between items-center select-none">
+        <div className="w-full max-w-[700px] mt-8 px-4 flex justify-between items-center select-none">
           {/* Movement Group */}
-          <div className="flex gap-6">
+          <div className="flex gap-4 md:gap-6">
             <button
               onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = true; }}
               onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
               onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchLeft'] = false; }}
-              className="w-20 h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
+              className="w-16 h-16 md:w-20 md:h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
             >
-              <div className="w-0 h-0 border-t-[12px] border-t-transparent border-r-[24px] border-r-[#00ffcc] border-b-[12px] border-b-transparent" />
+              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-r-[20px] border-r-[#00ffcc] border-b-[10px] border-b-transparent md:border-t-[12px] md:border-r-[24px] md:border-b-[12px]" />
             </button>
             <button
               onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = true; }}
               onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
               onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchRight'] = false; }}
-              className="w-20 h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
+              className="w-16 h-16 md:w-20 md:h-20 bg-[#1a1a2e] border-2 border-[#00ffcc]/40 rounded-2xl flex items-center justify-center active:bg-[#00ffcc]/20 active:scale-95 transition-all touch-none shadow-[0_4px_0_rgba(0,255,204,0.2)] active:translate-y-1 active:shadow-none"
             >
-              <div className="w-0 h-0 border-t-[12px] border-t-transparent border-l-[24px] border-l-[#00ffcc] border-b-[12px] border-b-transparent" />
+              <div className="w-0 h-0 border-t-[10px] border-t-transparent border-l-[20px] border-l-[#00ffcc] border-b-[10px] border-b-transparent md:border-t-[12px] md:border-l-[24px] md:border-b-[12px]" />
             </button>
           </div>
           
-          {/* Action Group */}
-          <div className="flex items-center gap-6">
-            <button
-              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
-              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
-              className={`w-20 h-20 rounded-full flex flex-col items-center justify-center transition-all duration-300 touch-none shadow-lg ${
-                overdrive >= 100 
-                  ? 'bg-[#ff3366] border-4 border-white animate-pulse scale-110 shadow-[0_0_30px_#ff3366]' 
-                  : 'bg-[#1a1a2e] border-2 border-[#ff3366]/40 opacity-50'
-              }`}
-            >
-              <Zap size={24} className={overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'} fill="currentColor" />
-              <span className={`text-[8px] font-bold mt-1 ${overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'}`}>OVERDRIVE</span>
-            </button>
+          {/* Overdrive Button (Centered with more space) */}
+          <button
+            onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
+            onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
+            className={`w-20 h-20 md:w-24 md:h-24 rounded-full flex flex-col items-center justify-center transition-all duration-300 touch-none shadow-lg ${
+              overdrive >= 100 
+                ? 'bg-[#ff3366] border-4 border-white animate-pulse scale-110 shadow-[0_0_30px_#ff3366]' 
+                : 'bg-[#1a1a2e] border-2 border-[#ff3366]/40 opacity-50'
+            }`}
+          >
+            <Zap size={24} className={overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'} fill="currentColor" />
+            <span className={`text-[8px] font-bold mt-1 ${overdrive >= 100 ? 'text-white' : 'text-[#ff3366]'}`}>OVERDRIVE</span>
+          </button>
 
-            <div className="flex flex-col items-center gap-1">
-              <button
-                onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = true; }}
-                onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
-                onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
-                className="w-24 h-24 bg-[#ff3366]/10 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/40 active:scale-90 transition-all touch-none shadow-[0_6px_0_rgba(255,51,102,0.3)] active:translate-y-1 active:shadow-none"
-              >
-                <div className="w-8 h-8 bg-[#ff3366] rounded-sm rotate-45 shadow-[0_0_15px_rgba(255,51,102,0.5)]" />
-              </button>
-              <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest opacity-50">Fire</span>
-            </div>
+          {/* Fire Group */}
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = true; }}
+              onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
+              onPointerLeave={(e) => { e.preventDefault(); keysPressed.current['TouchFire'] = false; }}
+              className="w-20 h-20 md:w-24 md:h-24 bg-[#ff3366]/10 border-4 border-[#ff3366]/50 rounded-full flex items-center justify-center active:bg-[#ff3366]/40 active:scale-90 transition-all touch-none shadow-[0_6px_0_rgba(255,51,102,0.3)] active:translate-y-1 active:shadow-none"
+            >
+              <div className="w-8 h-8 bg-[#ff3366] rounded-sm rotate-45 shadow-[0_0_15px_rgba(255,51,102,0.5)]" />
+            </button>
+            <span className="text-[10px] text-[#ff3366] font-bold uppercase tracking-widest opacity-50">Fire</span>
           </div>
         </div>
       )}
