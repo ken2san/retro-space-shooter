@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2 } from 'lucide-react';
+import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2, Shield, Cpu, Heart, Users, Activity } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
 import { audio } from './services/audio';
 
@@ -25,7 +25,7 @@ const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
 const ENEMY_SPACING = 55;
 
-type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR';
+type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR' | 'UPGRADE' | 'RELIC_SELECT';
 
 interface Bullet {
   x: number;
@@ -72,6 +72,7 @@ interface Enemy {
   entryDelay?: number;
   prevX?: number;
   prevY?: number;
+  stunnedUntil?: number;
 }
 
 interface Particle {
@@ -158,6 +159,21 @@ interface Obstacle {
   color: string;
 }
 
+interface DamageNumber {
+  x: number;
+  y: number;
+  value: string;
+  life: number;
+  maxLife: number;
+  color: string;
+}
+
+interface Drone {
+  angle: number;
+  distance: number;
+  lastShot: number;
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [gameState, setGameState] = useState<GameState>('LOADING');
@@ -168,6 +184,15 @@ export default function App() {
   const [sectorName, setSectorName] = useState('Outer Rim');
   const [distance, setDistance] = useState(25000);
   const [scrapCount, setScrapCount] = useState(0);
+  
+  // Leveling System
+  const [level, setLevel] = useState(1);
+  const [xp, setXp] = useState(0);
+  const [xpToNextLevel, setXpToNextLevel] = useState(100);
+  const levelRef = useRef(1);
+  const xpRef = useRef(0);
+  const xpToNextLevelRef = useRef(100);
+
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeOptions, setUpgradeOptions] = useState<{id: string, label: string, desc: string}[]>([]);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
@@ -196,11 +221,17 @@ export default function App() {
   const firepowerRef = useRef(1);
   const speedRef = useRef(1);
   const magnetRef = useRef(1);
+  const critChanceRef = useRef(0);
+  const regenRef = useRef(0);
+  const chainLightningRef = useRef(0);
+  const drones = useRef<Drone[]>([]);
+  const damageNumbers = useRef<DamageNumber[]>([]);
   const particles = useRef<Particle[]>([]);
   const trails = useRef<Trail[]>([]);
   const shake = useRef(0);
   const flash = useRef(0);
   const glitch = useRef(0);
+  const hitStopTimer = useRef(0);
   const offscreenCanvas = useRef<HTMLCanvasElement | null>(null);
   const offscreenCtx = useRef<CanvasRenderingContext2D | null>(null);
   const keysPressed = useRef<Record<string, boolean>>({});
@@ -211,6 +242,8 @@ export default function App() {
   const lastHitTime = useRef(0);
   const stars = useRef<{x: number, y: number, size: number, speed: number, opacity: number}[]>([]);
   const [combo, setCombo] = useState(0);
+  const [relics, setRelics] = useState<{id: string, label: string}[]>([]);
+  const relicsRef = useRef<{id: string, label: string}[]>([]);
   const [waveTitle, setWaveTitle] = useState(false);
   const [bossHealth, setBossHealth] = useState<{current: number, max: number} | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -407,7 +440,8 @@ export default function App() {
       entryDelay: delay,
       tractorBeamTimer: 0,
       isTractorBeaming: false,
-      tractorBeamX: 0
+      tractorBeamX: 0,
+      stunnedUntil: 0
     });
 
     if (isBossWave) {
@@ -475,16 +509,104 @@ export default function App() {
     enemies.current = newEnemies;
   };
 
+  const handleScrapCollection = (s: Scrap) => {
+    setScrapCount(prev => prev + 1);
+    setScore(prev => prev + 10);
+    const xpGain = 10;
+    xpRef.current += xpGain;
+    setXp(xpRef.current);
+
+    if (xpRef.current >= xpToNextLevelRef.current) {
+      xpRef.current -= xpToNextLevelRef.current;
+      levelRef.current += 1;
+      xpToNextLevelRef.current = Math.floor(xpToNextLevelRef.current * 1.2);
+      
+      setLevel(levelRef.current);
+      setXp(xpRef.current);
+      setXpToNextLevel(xpToNextLevelRef.current);
+      
+      triggerLevelUp();
+    }
+    
+    audio.playScrap();
+    createExplosion(s.x, s.y, '#00ffcc', 5);
+  };
+
+  const triggerLevelUp = () => {
+    const allOptions = [
+      { id: 'FIREPOWER', label: 'Plasma Overclock', desc: 'Increase bullet damage and size.' },
+      { id: 'SPEED', label: 'Engine Boost', desc: 'Increase movement speed and agility.' },
+      { id: 'MAGNET', label: 'Scrap Magnet', desc: 'Increase scrap collection range.' },
+      { id: 'CRIT', label: 'Critical Core', desc: '10% chance for double damage.' },
+    ];
+
+    // Pick 3 random
+    const shuffled = [...allOptions].sort(() => 0.5 - Math.random());
+    setUpgradeOptions(shuffled.slice(0, 3));
+    setShowUpgrade(true);
+    setGameState('UPGRADE');
+    audio.playUpgrade();
+  };
+
+  const triggerRelicSelection = () => {
+    const allRelics = [
+      { id: 'CHAIN', label: 'Tesla Arc', desc: 'Bullets jump between nearby enemies.' },
+      { id: 'DRONE', label: 'Tactical Drone', desc: 'Deploy an orbiting support drone.' },
+      { id: 'REGEN', label: 'Nano-Repair', desc: 'Slowly regenerate hull integrity.' },
+      { id: 'SHIELD_REGEN', label: 'Aegis Protocol', desc: 'Gain a temporary shield.' },
+      { id: 'WINGMAN', label: 'Wingman Support', desc: 'Summon a combat support ship.' },
+      { id: 'FRENZY', label: 'Overdrive Sync', desc: 'Overdrive lasts 50% longer.' },
+      { id: 'CHRONO', label: 'Chrono-Trigger', desc: 'Chance to slow time on enemy kill.' },
+      { id: 'EMP', label: 'EMP Burst', desc: 'Chance to stun enemies on hit.' },
+    ];
+
+    // Pick 3 random
+    const shuffled = [...allRelics].sort(() => 0.5 - Math.random());
+    setUpgradeOptions(shuffled.slice(0, 3));
+    setShowUpgrade(true);
+    setGameState('RELIC_SELECT');
+    audio.playUpgrade();
+  };
+
   const handleUpgrade = (id: string) => {
-    if (id === 'firepower') {
-      firepowerRef.current += 1;
-    } else if (id === 'speed') {
-      speedRef.current += 1;
-    } else if (id === 'shield') {
-      setLives(prev => Math.min(5, prev + 1));
-      livesRef.current = Math.min(5, livesRef.current + 1);
-    } else if (id === 'magnet') {
-      magnetRef.current += 1;
+    // Track if it's a relic to add to inventory
+    const relicLabels: Record<string, string> = {
+      'CHAIN': 'Tesla Arc',
+      'DRONE': 'Tactical Drone',
+      'REGEN': 'Nano-Repair',
+      'SHIELD_REGEN': 'Aegis Protocol',
+      'WINGMAN': 'Wingman Support',
+      'FRENZY': 'Overdrive Sync',
+      'CHRONO': 'Chrono-Trigger',
+      'EMP': 'EMP Burst'
+    };
+
+    if (relicLabels[id]) {
+      const newRelic = { id, label: relicLabels[id] };
+      setRelics(prev => [...prev, newRelic]);
+      relicsRef.current.push(newRelic);
+    }
+
+    switch (id) {
+      case 'FIREPOWER': firepowerRef.current += 0.5; break;
+      case 'SPEED': speedRef.current += 0.2; break;
+      case 'MAGNET': magnetRef.current += 0.5; break;
+      case 'CRIT': critChanceRef.current += 0.1; break;
+      case 'REGEN': regenRef.current += 0.001; break;
+      case 'CHAIN': chainLightningRef.current += 0.2; break;
+      case 'CHRONO': /* Handled in kill logic */ break;
+      case 'EMP': /* Handled in hit logic */ break;
+      case 'FRENZY': /* Handled in overdrive logic */ break;
+      case 'WINGMAN':
+        setHasWingman(true);
+        wingmanRef.current = true;
+        break;
+      case 'DRONE': 
+        drones.current.push({ angle: Math.random() * Math.PI * 2, distance: 60, lastShot: 0 });
+        break;
+      case 'SHIELD_REGEN':
+        activeEffects.current['SHIELD'] = Date.now() + 10000;
+        break;
     }
     
     // Resume overdrive timer if active
@@ -494,24 +616,30 @@ export default function App() {
     
     setShowUpgrade(false);
     
-    waveRef.current += 1;
-    setWave(waveRef.current);
-    
-    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
-    const sector = ((waveRef.current - 1) % 2) + 1;
-    const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
-    setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
-    
-    setDistance(prev => Math.max(0, prev - 1000));
-    initEnemies(waveRef.current);
-    
-    setWaveTitle(true);
-    audio.playStageStart();
-    setTimeout(() => setWaveTitle(false), 2000);
-    
-    setTimeout(() => {
-      isWarping.current = false;
-    }, 1000);
+    if (gameState === 'UPGRADE') {
+      setGameState('PLAYING');
+    } else {
+      setGameState('PLAYING');
+      waveRef.current += 1;
+      setWave(waveRef.current);
+      
+      const stage = Math.min(5, Math.ceil(waveRef.current / 2));
+      const sector = ((waveRef.current - 1) % 2) + 1;
+      const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
+      setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
+      
+      setDistance(prev => Math.max(0, prev - 1000));
+      initEnemies(waveRef.current);
+      
+      setWaveTitle(true);
+      audio.playStageStart();
+      setTimeout(() => setWaveTitle(false), 2000);
+      
+      setTimeout(() => {
+        isWarping.current = false;
+        warpFactor.current = 0;
+      }, 1000);
+    }
   };
 
   const startGame = () => {
@@ -523,11 +651,24 @@ export default function App() {
     setSectorName('Tutorial - SECTOR 1');
     setDistance(25000);
     setScrapCount(0);
+    setLevel(1);
+    setXp(0);
+    setXpToNextLevel(100);
+    setRelics([]);
+    relicsRef.current = [];
+    levelRef.current = 1;
+    xpRef.current = 0;
+    xpToNextLevelRef.current = 100;
     setShowUpgrade(false);
     setBossHealth(null);
     firepowerRef.current = 1;
     speedRef.current = 1;
     magnetRef.current = 1;
+    critChanceRef.current = 0;
+    regenRef.current = 0;
+    chainLightningRef.current = 0;
+    drones.current = [];
+    damageNumbers.current = [];
     livesRef.current = 3;
     waveRef.current = 1;
     setHasWingman(false);
@@ -683,7 +824,9 @@ export default function App() {
 
   const activateOverdrive = () => {
     isOverdriveActive.current = true;
-    overdriveEndTime.current = Date.now() + 10000;
+    const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
+    const duration = hasFrenzy ? 15000 : 10000;
+    overdriveEndTime.current = Date.now() + duration;
     shake.current = 30;
     flash.current = 0.5;
     audio.playOverdrive();
@@ -841,12 +984,42 @@ export default function App() {
       s.y += 1; // Drift down
       
       if (dist < 30) {
-        setScrapCount(prev => prev + 1);
+        handleScrapCollection(s);
         s.life = 0;
-        setScore(prev => prev + 10);
       }
     });
     scraps.current = scraps.current.filter(s => s.y < CANVAS_HEIGHT && s.life > 0);
+
+    // Update Damage Numbers
+    damageNumbers.current.forEach(dn => dn.life -= 1);
+    damageNumbers.current = damageNumbers.current.filter(dn => dn.life > 0);
+
+    // Update Drones
+    drones.current.forEach(drone => {
+      drone.angle += 0.05;
+      const now = Date.now();
+      if (now - drone.lastShot > 500) {
+        drone.lastShot = now;
+        const dx = playerPos.current.x + PLAYER_WIDTH / 2 + Math.cos(drone.angle) * drone.distance;
+        const dy = playerPos.current.y + PLAYER_HEIGHT / 2 + Math.sin(drone.angle) * drone.distance;
+        bullets.current.push({
+          x: dx,
+          y: dy,
+          vx: 0,
+          vy: -12,
+          damage: firepowerRef.current * 0.5,
+          size: 3
+        });
+        audio.playShoot(dx);
+      }
+    });
+
+    // Nano-Repair (Regen)
+    if (regenRef.current > 0 && livesRef.current < 3) {
+      livesRef.current += regenRef.current;
+      if (livesRef.current > 3) livesRef.current = 3;
+      setLives(Math.floor(livesRef.current));
+    }
 
     // Update Asteroids
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
@@ -1156,6 +1329,11 @@ export default function App() {
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
       
+      // EMP Stun check
+      if (enemy.stunnedUntil && enemy.stunnedUntil > currentTime) {
+        return;
+      }
+
       enemy.prevX = enemy.x;
       enemy.prevY = enemy.y;
 
@@ -1484,8 +1662,54 @@ export default function App() {
             bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
           
+          let damage = (bullet.damage || 1) * 10;
+          let isCrit = false;
+          if (Math.random() < critChanceRef.current) {
+            damage *= 2;
+            isCrit = true;
+          }
+
+          // Damage Number
+          damageNumbers.current.push({
+            x: enemy.x + enemy.width / 2 + (Math.random() - 0.5) * 20,
+            y: enemy.y,
+            value: damage,
+            life: 30,
+            color: isCrit ? '#ffcc00' : '#ffffff',
+            isCrit
+          });
+
+          // Tesla Arc (Chain Lightning)
+          if (chainLightningRef.current > 0) {
+            const nearby = enemies.current.filter(e => e !== enemy && e.alive);
+            nearby.forEach(e => {
+              const edx = enemy.x - e.x;
+              const edy = enemy.y - e.y;
+              const edist = Math.sqrt(edx * edx + edy * edy);
+              if (edist < 100) {
+                const chainDamage = damage * chainLightningRef.current;
+                if (e.isBoss) {
+                  e.health! -= chainDamage;
+                } else {
+                  e.health! = (e.health || 10) - chainDamage;
+                  if (e.health! <= 0) e.alive = false;
+                }
+                createExplosion(e.x + e.width / 2, e.y + e.height / 2, '#00ffff', 3);
+              }
+            });
+          }
+
+          // Hit stop
+          hitStopTimer.current = 2;
+
+          // EMP Burst
+          if (relicsRef.current.some(r => r.id === 'EMP') && Math.random() < 0.1) {
+            enemy.stunnedUntil = Date.now() + 2000;
+            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 10);
+          }
+
           if (enemy.isBoss) {
-            enemy.health! -= (bullet.damage || 1) * 10;
+            enemy.health! -= damage;
             setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
             bullets.current.splice(bIdx, 1);
             audio.playEnemyHit(enemy.x + enemy.width / 2);
@@ -1493,6 +1717,12 @@ export default function App() {
             
             if (enemy.health! <= 0) {
               enemy.alive = false;
+              
+              // Chrono Trigger
+              if (relicsRef.current.some(r => r.id === 'CHRONO') && Math.random() < 0.05) {
+                timeScale.current = 0.3;
+              }
+
               setBossHealth(null);
               setScore(s => s + 5000 * (waveRef.current / 5));
               
@@ -1552,6 +1782,10 @@ export default function App() {
           }
 
           enemy.alive = false;
+          // Chrono Trigger
+          if (relicsRef.current.some(r => r.id === 'CHRONO') && Math.random() < 0.05) {
+            timeScale.current = 0.3;
+          }
           bullets.current.splice(bIdx, 1);
           
           // Drop scrap
@@ -1745,17 +1979,8 @@ export default function App() {
       obstacles.current = [];
 
       setTimeout(() => {
-        // Show Upgrade Choice
-        const options = [
-          { id: 'firepower', label: 'Enhanced Plasma', desc: 'Increase bullet size and damage' },
-          { id: 'speed', label: 'Overclocked Thrusters', desc: 'Permanent movement speed boost' },
-          { id: 'shield', label: 'Nano-Repair', desc: 'Restore 1 life or gain temporary shield' },
-          { id: 'magnet', label: 'Scrap Magnet', desc: 'Increase scrap collection range' }
-        ];
-        // Pick 2 random
-        const shuffled = options.sort(() => 0.5 - Math.random());
-        setUpgradeOptions(shuffled.slice(0, 2));
-        setShowUpgrade(true);
+        // Show Relic Selection (VS Style)
+        triggerRelicSelection();
         pauseStartTime.current = Date.now();
       }, 1500);
     }
@@ -2374,6 +2599,40 @@ export default function App() {
     });
     ctx.globalAlpha = 1.0;
 
+    // Drones
+    drones.current.forEach(drone => {
+      const dx = playerPos.current.x + PLAYER_WIDTH / 2 + Math.cos(drone.angle) * drone.distance;
+      const dy = playerPos.current.y + PLAYER_HEIGHT / 2 + Math.sin(drone.angle) * drone.distance;
+      
+      ctx.save();
+      ctx.translate(dx, dy);
+      ctx.rotate(drone.angle + Math.PI / 2);
+      
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#00ffcc';
+      ctx.strokeStyle = '#00ffcc';
+      ctx.lineWidth = 2;
+      
+      ctx.beginPath();
+      ctx.moveTo(0, -5);
+      ctx.lineTo(4, 3);
+      ctx.lineTo(-4, 3);
+      ctx.closePath();
+      ctx.stroke();
+      
+      ctx.restore();
+    });
+
+    // Damage Numbers
+    damageNumbers.current.forEach(dn => {
+      ctx.globalAlpha = dn.life / 30;
+      ctx.fillStyle = dn.color;
+      ctx.font = `bold ${dn.isCrit ? '16px' : '12px'} 'JetBrains Mono'`;
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.floor(dn.value).toString(), dn.x, dn.y - (30 - dn.life));
+    });
+    ctx.globalAlpha = 1.0;
+
     ctx.restore(); // Restore from shake
 
     // Nebula Pass Effect (Stage 3: Heavy Fire)
@@ -2501,8 +2760,13 @@ export default function App() {
     const ctx = canvas?.getContext('2d');
     
     if (ctx) {
-      update();
-      draw(ctx);
+      if (hitStopTimer.current > 0) {
+        hitStopTimer.current -= 1;
+        draw(ctx);
+      } else {
+        update();
+        draw(ctx);
+      }
     }
     
     requestRef.current = requestAnimationFrame(loop);
@@ -2531,6 +2795,23 @@ export default function App() {
     <div className="min-h-screen bg-[#020205] text-white flex flex-col items-center justify-center font-mono overflow-hidden">
       {/* Consolidated Compact HUD (Genius Designer Style) */}
       <div className="w-full max-w-[600px] px-4 mb-3 flex flex-col gap-2 z-[100] relative">
+        {/* Level & XP Bar (Top Full Width) */}
+        <div className="w-full flex flex-col gap-1 mb-1">
+          <div className="flex justify-between items-end px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[8px] text-gray-500 font-black uppercase tracking-[0.2em]">Pilot Level</span>
+              <span className="text-sm font-black text-[#00ffcc] drop-shadow-[0_0_8px_rgba(0,255,204,0.5)]">{level}</span>
+            </div>
+            <span className="text-[7px] text-gray-600 font-bold uppercase tracking-widest">{Math.floor(xp)} / {xpToNextLevel} XP</span>
+          </div>
+          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden border border-white/5 p-[1px]">
+            <motion.div 
+              animate={{ width: `${(xp / xpToNextLevel) * 100}%` }}
+              className="h-full bg-[#00ffcc] shadow-[0_0_10px_rgba(0,255,204,0.8)] rounded-full"
+            />
+          </div>
+        </div>
+
         {/* HUD Decorative Brackets */}
         <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[#00ffcc]/30 rounded-tl-md" />
         <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-[#00ffcc]/30 rounded-tr-md" />
@@ -2542,7 +2823,7 @@ export default function App() {
           <div className="flex flex-col">
             <div className="flex items-center gap-2 mb-1">
               <div className="w-1 h-3 bg-[#00ffcc] rounded-full animate-pulse" />
-              <span className="text-[10px] font-black text-[#00ffcc] uppercase tracking-[0.4em]">Sector {Math.min(5, Math.ceil(wave / 2))}-{wave % 2 === 0 ? 2 : 1}</span>
+              <span className="text-[10px] font-black text-[#00ffcc] uppercase tracking-[0.4em]">{sectorName}</span>
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-3xl font-black text-white tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
@@ -2646,6 +2927,31 @@ export default function App() {
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
+        {/* Relic Inventory (VS Style) */}
+        <div className="absolute top-16 left-4 flex flex-col gap-1 pointer-events-none">
+          <span className="text-[8px] text-[#00ffcc]/40 font-bold uppercase tracking-widest">Tech_Inventory</span>
+          <div className="flex gap-1 max-w-[120px] flex-wrap">
+            {relics.map((relic, i) => (
+              <motion.div
+                key={`${relic.id}-${i}`}
+                initial={{ scale: 0, rotate: -45 }}
+                animate={{ scale: 1, rotate: 0 }}
+                className="w-5 h-5 bg-[#00ffcc]/10 border border-[#00ffcc]/40 flex items-center justify-center rounded shadow-[0_0_10px_rgba(0,255,204,0.1)]"
+                title={relic.label}
+              >
+                {relic.id === 'CHAIN' && <Zap className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'DRONE' && <Cpu className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'REGEN' && <Heart className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'SHIELD_REGEN' && <Shield className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'WINGMAN' && <Users className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'FRENZY' && <Activity className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'CHRONO' && <RotateCcw className="w-3 h-3 text-[#00ffcc]" />}
+                {relic.id === 'EMP' && <Zap className="w-3 h-3 text-[#ff3366]" />}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
         {/* Active Power-ups UI */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-2">
           {Object.entries(activeEffects.current).map(([type, expiry]) => (
@@ -2690,34 +2996,51 @@ export default function App() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-8"
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-8 backdrop-blur-md"
             >
+              {/* Background Micro-details */}
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00ffcc]/50 to-transparent" />
+              <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00ffcc]/50 to-transparent" />
+              <div className="absolute top-4 left-4 text-[8px] text-[#00ffcc]/30 font-mono">SYSTEM_UPGRADE_PROTOCOL_v2.4</div>
+              <div className="absolute bottom-4 right-4 text-[8px] text-[#00ffcc]/30 font-mono">AWAITING_PILOT_INPUT...</div>
+
               <motion.div 
                 initial={{ y: 20 }}
                 animate={{ y: 0 }}
                 className="text-center mb-12"
               >
-                <h3 className="text-[#00ffcc] text-xs uppercase tracking-[0.5em] mb-2">Sector Cleared</h3>
-                <h2 className="text-4xl font-black italic tracking-tighter">CHOOSE ENHANCEMENT</h2>
+                <h3 className="text-[#00ffcc] text-xs uppercase tracking-[0.5em] mb-2">
+                  {gameState === 'UPGRADE' ? 'Level Up' : 'Relic Found'}
+                </h3>
+                <h2 className="text-4xl font-black italic tracking-tighter uppercase">
+                  {gameState === 'UPGRADE' ? 'CHOOSE ENHANCEMENT' : 'SELECT TECHNOLOGY'}
+                </h2>
               </motion.div>
               
               <div className="grid grid-cols-1 gap-4 w-full max-w-xs">
-                {upgradeOptions.map((opt) => (
+                {upgradeOptions.map((opt, idx) => (
                   <motion.button
                     key={opt.id}
+                    initial={{ x: -20, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: idx * 0.1 }}
                     whileHover={{ scale: 1.05, backgroundColor: 'rgba(0, 255, 204, 0.1)' }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => handleUpgrade(opt.id)}
-                    className="flex flex-col items-start p-4 border border-[#00ffcc]/30 bg-black/50 rounded-lg text-left transition-colors hover:border-[#00ffcc]"
+                    className="flex flex-col items-start p-4 border border-[#00ffcc]/30 bg-black/50 rounded-lg text-left transition-colors hover:border-[#00ffcc] group"
                   >
-                    <span className="text-[#00ffcc] font-bold uppercase tracking-widest text-sm mb-1">{opt.label}</span>
-                    <span className="text-gray-400 text-[10px] leading-tight">{opt.desc}</span>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Zap className="w-3 h-3 text-[#00ffcc] group-hover:animate-pulse" />
+                      <span className="text-[#00ffcc] font-bold uppercase tracking-widest text-sm">{opt.label}</span>
+                    </div>
+                    <span className="text-gray-400 text-[10px] leading-tight ml-5">{opt.desc}</span>
                   </motion.button>
                 ))}
               </div>
               
               <div className="mt-12 text-[8px] text-gray-600 uppercase tracking-[0.3em]">
-                System Scavenging Complete
+                {gameState === 'UPGRADE' ? 'Pilot Evolution in Progress' : 'Ancient Technology Recovered'}
               </div>
             </motion.div>
           )}
