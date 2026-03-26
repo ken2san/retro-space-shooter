@@ -14,13 +14,13 @@ const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 800;
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 50;
-const PLAYER_SPEED = 3.5;
+const PLAYER_SPEED = 5.0; // Synchronized speed
 const FOLLOW_SMOOTHNESS = 0.15;
 const GRAZE_DISTANCE = 40;
 const MAX_OVERDRIVE = 100;
-const BULLET_SPEED = 5;
-const ENEMY_DIVE_SPEED = 1.8;
-const ENEMY_BULLET_SPEED = 2.2;
+const BULLET_SPEED = 8; // Synchronized speed
+const ENEMY_DIVE_SPEED = 2.5; // Synchronized speed
+const ENEMY_BULLET_SPEED = 3.5; // Synchronized speed
 const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
 const ENEMY_SPACING = 55;
@@ -64,6 +64,7 @@ interface Enemy {
   isFinalBoss?: boolean;
   tractorBeamTimer?: number;
   isTractorBeaming?: boolean;
+  tractorBeamX?: number;
   // Entry path properties
   state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING';
   path?: { x: number, y: number }[];
@@ -182,6 +183,8 @@ export default function App() {
   const playerPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
   const targetPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
   const playerTilt = useRef(0);
+  const asteroidSpawnTimer = useRef(0);
+  const lastAsteroidX = useRef(0);
   const timeScale = useRef(1.0);
   const grazeCount = useRef(0);
   const isDualFighter = useRef(false);
@@ -203,7 +206,7 @@ export default function App() {
   const keysPressed = useRef<Record<string, boolean>>({});
   const lastShotTime = useRef(0);
   const lastDiveTime = useRef(0);
-  const requestRef = useRef<number>(null);
+  const requestRef = useRef<number | null>(null);
   const comboRef = useRef(0);
   const lastHitTime = useRef(0);
   const stars = useRef<{x: number, y: number, size: number, speed: number, opacity: number}[]>([]);
@@ -307,6 +310,10 @@ export default function App() {
               loadedImages[name] = img;
               resolve();
             };
+            img.onerror = () => {
+              console.warn(`Failed to load asset: ${name}`);
+              resolve(); // Resolve anyway to avoid hanging
+            };
           });
         });
 
@@ -397,84 +404,69 @@ export default function App() {
       state: path ? 'ENTERING' : 'IN_FORMATION',
       path: path,
       pathIndex: 0,
-      entryDelay: delay
+      entryDelay: delay,
+      tractorBeamTimer: 0,
+      isTractorBeaming: false,
+      tractorBeamX: 0
     });
 
     if (isBossWave) {
       audio.playBossWarning();
       if (waveNum === 6) {
-        // Mid-Boss: Tractor Carrier
+        // Level 3 Mid-Boss: Tractor Carrier (Galaga Homage)
         const boss: Enemy = {
-          ...createEnemy(CANVAS_WIDTH / 2 - 50, 80, 1),
-          width: 120, height: 90, isBoss: true, health: 1000, maxHealth: 1000,
-          phase: 1, moveDir: 1, lastShotTime: 0,
-          tractorBeamTimer: 0, isTractorBeaming: false
-        };
-        newEnemies.push(boss);
-        setBossHealth({ current: 1000, max: 1000 });
-      } else if (waveNum === 10) {
-        // Final Boss: The Core
-        const boss: Enemy = {
-          ...createEnemy(CANVAS_WIDTH / 2 - 90, 80, 2),
-          width: 180, height: 150, isBoss: true, isFinalBoss: true, health: 3000, maxHealth: 3000,
+          ...createEnemy(CANVAS_WIDTH / 2 - 60, 80, 1),
+          width: 120, height: 90, isBoss: true, health: 1500, maxHealth: 1500,
           phase: 1, moveDir: 1, lastShotTime: 0
         };
         newEnemies.push(boss);
-        setBossHealth({ current: 3000, max: 3000 });
+        setBossHealth({ current: 1500, max: 1500 });
+      } else if (waveNum === 10) {
+        // Level 5 Final Boss: The Core (Mothership)
+        const boss: Enemy = {
+          ...createEnemy(CANVAS_WIDTH / 2 - 100, 80, 2),
+          width: 200, height: 160, isBoss: true, isFinalBoss: true, health: 5000, maxHealth: 5000,
+          phase: 1, moveDir: 1, lastShotTime: 0
+        };
+        newEnemies.push(boss);
+        setBossHealth({ current: 5000, max: 5000 });
       }
     } else {
-      // Normal Waves
+      // Normal Waves strictly following the 5-stage design
       if (stage === 1) {
-        // Tutorial: Scouts only
-        for (let i = 0; i < 10 + (waveNum % 2) * 5; i++) {
-          newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
+        // Level 1: Scouts only, formation flight
+        for (let i = 0; i < 12; i++) {
+          newEnemies.push(createEnemy(80 + (i % 4) * 120, 60 + Math.floor(i / 4) * 80, 0));
         }
       } else if (stage === 2) {
-        // Asteroid Belt: Scouts
-        for (let i = 0; i < 12; i++) {
-          newEnemies.push(createEnemy(100 + (i % 4) * 120, 60 + Math.floor(i / 4) * 80, 0));
+        // Level 2: Scouts + Asteroids (handled in update)
+        for (let i = 0; i < 10; i++) {
+          newEnemies.push(createEnemy(100 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
         }
       } else if (stage === 3) {
-        // Heavy Fire: Snipers + Turrets
-        for (let i = 0; i < 10; i++) {
-          newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, 1));
+        // Level 3: Snipers + Turrets
+        for (let i = 0; i < 8; i++) {
+          newEnemies.push(createEnemy(60 + (i % 4) * 140, 60 + Math.floor(i / 4) * 70, 1));
         }
-        // Add some turrets
         for (let i = 0; i < 3; i++) {
-          const turret = createEnemy(100 + i * 150, 200, 1);
+          const turret = createEnemy(120 + i * 180, 220, 1);
           turret.isTurret = true;
-          turret.width = 50;
-          turret.height = 50;
-          turret.health = 50;
+          turret.width = 50; turret.height = 50; turret.health = 80;
           newEnemies.push(turret);
         }
       } else if (stage === 4) {
-        // Chase: Fast scouts from sides and bottom
-        for (let i = 0; i < 15; i++) {
-          const side = Math.floor(Math.random() * 3); // 0: left, 1: right, 2: bottom
-          let x = 0, y = 0;
-          let diveX = 0, diveY = 0;
-          if (side === 0) { 
-            x = -50; y = Math.random() * CANVAS_HEIGHT; 
-            diveX = 5; diveY = (Math.random() - 0.5) * 2;
-          } else if (side === 1) { 
-            x = CANVAS_WIDTH + 50; y = Math.random() * CANVAS_HEIGHT; 
-            diveX = -5; diveY = (Math.random() - 0.5) * 2;
-          } else { 
-            x = Math.random() * CANVAS_WIDTH; y = CANVAS_HEIGHT + 50; 
-            diveX = (Math.random() - 0.5) * 2; diveY = -5;
-          }
-          const enemy = createEnemy(x, y, 2);
+        // Level 4: Fast scouts from sides and bottom
+        for (let i = 0; i < 12; i++) {
+          const enemy = createEnemy(Math.random() * CANVAS_WIDTH, -50, 2);
           enemy.state = 'DIVING';
           enemy.isDiving = true;
-          enemy.diveX = diveX;
-          enemy.diveY = diveY;
-          enemy.diveType = 'chase';
+          enemy.diveX = (Math.random() - 0.5) * 4;
+          enemy.diveY = 7;
           newEnemies.push(enemy);
         }
       } else if (stage === 5) {
-        // Final Front: Mixed
-        for (let i = 0; i < 20; i++) {
+        // Level 5: Mixed Elite
+        for (let i = 0; i < 15; i++) {
           newEnemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, i % 3));
         }
       }
@@ -772,16 +764,16 @@ export default function App() {
     const speedMultiplier = 1 + (speedRef.current - 1) * 0.15;
     const currentSpeed = (isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
 
-    if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA'] || keysPressed.current['TouchLeft']) {
+    if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) {
       targetPos.current.x = Math.max(0, targetPos.current.x - currentSpeed);
     }
-    if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD'] || keysPressed.current['TouchRight']) {
+    if (keysPressed.current['ArrowRight'] || keysPressed.current['KeyD']) {
       targetPos.current.x = Math.min(CANVAS_WIDTH - PLAYER_WIDTH, targetPos.current.x + currentSpeed);
     }
-    if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW'] || keysPressed.current['TouchUp']) {
+    if (keysPressed.current['ArrowUp'] || keysPressed.current['KeyW']) {
       targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, targetPos.current.y - currentSpeed);
     }
-    if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS'] || keysPressed.current['TouchDown']) {
+    if (keysPressed.current['ArrowDown'] || keysPressed.current['KeyS']) {
       targetPos.current.y = Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, targetPos.current.y + currentSpeed);
     }
 
@@ -790,9 +782,9 @@ export default function App() {
     playerPos.current.x += (targetPos.current.x - playerPos.current.x) * FOLLOW_SMOOTHNESS;
     playerPos.current.y += (targetPos.current.y - playerPos.current.y) * FOLLOW_SMOOTHNESS;
 
-    // Calculate Tilt
+    // Calculate Tilt (Smoother)
     const dx = playerPos.current.x - prevX;
-    playerTilt.current = dx * 0.15;
+    playerTilt.current += (dx * 0.15 - playerTilt.current) * 0.1;
 
     let isMoving = Math.abs(dx) > 0.1 || Math.abs(playerPos.current.y - targetPos.current.y) > 0.1;
 
@@ -859,27 +851,43 @@ export default function App() {
     // Update Asteroids
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
     const isAsteroidBelt = currentStage === 2;
-    if (isAsteroidBelt && !isWarping.current && Math.random() < 0.02) {
-      const size = isAsteroidBelt ? Math.random() * 80 + 60 : Math.random() * 40 + 20;
-      const vertices = [];
-      for (let i = 0; i < 8; i++) {
-        vertices.push(0.8 + Math.random() * 0.4);
+    
+    // Asteroid Spawning Logic (Route Guarantee)
+    if ((isAsteroidBelt || currentStage === 5) && !isWarping.current) {
+      asteroidSpawnTimer.current += 16 * timeScale.current;
+      const spawnRate = isAsteroidBelt ? 600 : 1200;
+      if (asteroidSpawnTimer.current > spawnRate) {
+        asteroidSpawnTimer.current = 0;
+        
+        // Ensure a gap: Divide screen into 3 lanes, pick 2 to spawn in
+        const lanes = [0, 1, 2];
+        const emptyLane = Math.floor(Math.random() * 3);
+        const spawnLanes = lanes.filter(l => l !== emptyLane);
+        
+        spawnLanes.forEach(lane => {
+          const size = isAsteroidBelt ? Math.random() * 80 + 60 : Math.random() * 40 + 20;
+          const x = (lane * (CANVAS_WIDTH / 3)) + (Math.random() * (CANVAS_WIDTH / 3 - size));
+          const vertices = [];
+          for (let i = 0; i < 8; i++) {
+            vertices.push(0.8 + Math.random() * 0.4);
+          }
+          asteroids.current.push({
+            x: x + size / 2,
+            y: -150,
+            size: size,
+            speed: isAsteroidBelt ? 3 : 5,
+            rotation: Math.random() * Math.PI * 2,
+            vr: (Math.random() - 0.5) * 0.05,
+            hp: isAsteroidBelt ? 999999 : 15, // Indestructible in Stage 2
+            vertices: vertices
+          });
+        });
       }
-      asteroids.current.push({
-        x: Math.random() * CANVAS_WIDTH,
-        y: -150,
-        size: size,
-        speed: Math.random() * 2 + 1,
-        rotation: Math.random() * Math.PI * 2,
-        vr: (Math.random() - 0.5) * 0.05,
-        hp: isAsteroidBelt ? 9999 : 3, // Indestructible in belt
-        vertices: vertices
-      });
     }
     
     asteroids.current.forEach(a => {
-      a.y += a.speed;
-      a.rotation += a.vr;
+      a.y += a.speed * timeScale.current;
+      a.rotation += a.vr * timeScale.current;
       
       // Collision with player
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - a.x;
@@ -887,21 +895,7 @@ export default function App() {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < a.size * 0.8 && Date.now() > invulnerableUntil.current) {
         handlePlayerHit();
-        if (!isAsteroidBelt) a.hp = 0; // Destroy asteroid if not in belt
-      }
-      
-      // Collision with wingman
-      if (wingmanRef.current) {
-        const wdx = (wingmanPos.current.x + PLAYER_WIDTH / 2) - a.x;
-        const wdy = (wingmanPos.current.y + PLAYER_HEIGHT / 2) - a.y;
-        const wdist = Math.sqrt(wdx * wdx + wdy * wdy);
-        if (wdist < a.size * 0.8) {
-          setHasWingman(false);
-          wingmanRef.current = false;
-          createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
-          audio.playExplosion(wingmanPos.current.x);
-          if (!isAsteroidBelt) a.hp = 0;
-        }
+        a.hp = 0; // Destroy on impact
       }
       
       // Collision with bullets
@@ -910,12 +904,39 @@ export default function App() {
         const bdy = b.y - a.y;
         const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
         if (bdist < a.size) {
-          if (!isAsteroidBelt) a.hp -= (b.damage || 1);
+          a.hp -= (b.damage || 1);
           b.y = -100; // Remove bullet
-          if (a.hp <= 0 && !isAsteroidBelt) {
+          
+          // Hit feedback: small flash particles
+          if (Math.random() > 0.5) {
+            particles.current.push({
+              x: b.x,
+              y: b.y,
+              vx: (Math.random() - 0.5) * 4,
+              vy: (Math.random() - 0.5) * 4,
+              life: 10,
+              maxLife: 10,
+              color: '#ffffff',
+              size: 2
+            });
+          }
+
+          if (a.hp <= 0) {
             audio.playExplosion(a.x);
-            createExplosion(a.x, a.y, '#888888', 10);
-            setScore(s => s + 50);
+            // Destruction particles (Neon burst)
+            for (let i = 0; i < 15; i++) {
+              particles.current.push({
+                x: a.x,
+                y: a.y,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 0.5) * 8,
+                life: 30,
+                maxLife: 30,
+                color: isAsteroidBelt ? '#00ffcc' : '#888888',
+                size: Math.random() * 3 + 1
+              });
+            }
+            setScore(s => s + 100);
           }
         }
       });
@@ -1129,6 +1150,8 @@ export default function App() {
     // Update enemies formation
     const currentEnemyDiveSpeed = (ENEMY_DIVE_SPEED + waveRef.current * 0.2) * timeScale.current;
     const formationOffset = (Math.sin(Date.now() / 1200) * 60);
+    const currentTime = Date.now();
+    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
     
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
@@ -1169,31 +1192,51 @@ export default function App() {
 
       // Boss Logic
       if (enemy.isBoss) {
-        const stage = Math.min(5, Math.ceil(waveRef.current / 2));
-        
+        // Tractor Beam Logic (Mid-Boss)
+        if (waveRef.current === 6) {
+          enemy.tractorBeamTimer += 16 * timeScale.current;
+          if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 3000) {
+            enemy.isTractorBeaming = true;
+            enemy.tractorBeamTimer = 0;
+            enemy.tractorBeamX = enemy.x + enemy.width / 2;
+            audio.playTractorBeam();
+          }
+          if (enemy.isTractorBeaming) {
+            if (enemy.tractorBeamTimer > 2500) {
+              enemy.isTractorBeaming = false;
+              enemy.tractorBeamTimer = 0;
+            }
+            // Check collision with beam
+            const beamWidth = 100;
+            const px = playerPos.current.x + PLAYER_WIDTH / 2;
+            if (Math.abs(px - enemy.tractorBeamX) < beamWidth / 2 && playerPos.current.y > enemy.y) {
+              isHackedRef.current = true;
+              glitch.current = 10;
+            }
+          }
+        }
+
         if (enemy.y < enemy.originY) {
           enemy.y += 1; // Entry
         } else {
           // Horizontal movement
-          let moveSpeed = stage === 4 ? 4 : 1.5; // Speed Demon is faster
+          let moveSpeed = stage === 4 ? 4 : 1.5;
           
-          // Final Boss Phase 3 Dash
           if (stage === 5 && enemy.phase === 3) {
-            const now = Date.now();
             if (!enemy.diveStartX) {
-              enemy.diveStartX = now; // Use as timer
+              enemy.diveStartX = currentTime;
             }
-            const dashTime = now - enemy.diveStartX;
+            const dashTime = currentTime - enemy.diveStartX;
             if (dashTime < 1000) {
-              moveSpeed = 0; // Stop and aim
+              moveSpeed = 0;
               enemy.diveX = playerPos.current.x - enemy.width / 2;
             } else if (dashTime < 1500) {
-              enemy.y += 15; // Dash down
+              enemy.y += 15;
               enemy.x += (enemy.diveX - enemy.x) * 0.1;
             } else if (dashTime < 2500) {
-              enemy.y -= 5; // Return
+              enemy.y -= 5;
             } else {
-              enemy.diveStartX = 0; // Reset
+              enemy.diveStartX = 0;
               enemy.y = enemy.originY;
             }
           } else {
@@ -1208,63 +1251,27 @@ export default function App() {
           else if (enemy.health! < enemy.maxHealth! * 0.6) enemy.phase = 2;
 
           // Boss shooting
-          const now = Date.now();
           let shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
-          if (stage === 5) shootInterval *= 0.7; // Final boss fires faster
+          if (stage === 5) shootInterval *= 0.7;
           
-          if (stage === 3) {
-            // Mid-Boss Tractor Beam Logic
-            if (!enemy.isTractorBeaming) {
-              if (now - (enemy.tractorBeamTimer || 0) > 5000) {
-                enemy.isTractorBeaming = true;
-                enemy.tractorBeamTimer = now;
-              }
-            } else {
-              if (now - (enemy.tractorBeamTimer || 0) > 2000) {
-                enemy.isTractorBeaming = false;
-                enemy.tractorBeamTimer = now;
-              } else {
-                // Check collision with player
-                const beamWidth = 80;
-                const beamX = enemy.x + enemy.width / 2 - beamWidth / 2;
-                const beamY = enemy.y + enemy.height;
-                const beamHeight = CANVAS_HEIGHT;
-                
-                const px = playerPos.current.x;
-                const py = playerPos.current.y;
-                
-                if (px < beamX + beamWidth && px + PLAYER_WIDTH > beamX &&
-                    py < beamY + beamHeight && py + PLAYER_HEIGHT > beamY) {
-                  isHackedRef.current = true;
-                }
-              }
-            }
-          }
-          
-          if (now - (enemy.lastShotTime || 0) > shootInterval) {
-            enemy.lastShotTime = now;
+          if (currentTime - (enemy.lastShotTime || 0) > shootInterval) {
+            enemy.lastShotTime = currentTime;
             audio.playEnemyShoot(enemy.x + enemy.width / 2);
 
-            if (stage === 3) {
-              // Mid-Boss: Tractor Carrier
-              // Fires simple aimed shots while not tractor beaming
-              if (!enemy.isTractorBeaming) {
-                const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
-                const dy = playerPos.current.y - (enemy.y + enemy.height);
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                for (let i = -1; i <= 1; i++) {
-                  enemyBullets.current.push({
-                    x: enemy.x + enemy.width / 2,
-                    y: enemy.y + enemy.height,
-                    vx: (dx / dist) * 4 + i * 0.5,
-                    vy: (dy / dist) * 4
-                  });
-                }
+            if (stage === 3 && !enemy.isTractorBeaming) {
+              const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
+              const dy = playerPos.current.y - (enemy.y + enemy.height);
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              for (let i = -1; i <= 1; i++) {
+                enemyBullets.current.push({
+                  x: enemy.x + enemy.width / 2,
+                  y: enemy.y + enemy.height,
+                  vx: (dx / dist) * 4 + i * 0.5,
+                  vy: (dy / dist) * 4
+                });
               }
             } else if (stage === 5) {
-              // The Core: Multi-phase Bullet Hell
               if (enemy.phase === 1) {
-                // Normal aimed spread
                 const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
                 const dy = playerPos.current.y - (enemy.y + enemy.height);
                 const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1277,9 +1284,8 @@ export default function App() {
                   });
                 }
               } else if (enemy.phase === 2) {
-                // Spiral
                 for (let i = 0; i < 4; i++) {
-                  const angle = (now / 200) + (i * Math.PI / 2);
+                  const angle = (currentTime / 200) + (i * Math.PI / 2);
                   enemyBullets.current.push({
                     x: enemy.x + enemy.width / 2,
                     y: enemy.y + enemy.height / 2,
@@ -1288,7 +1294,6 @@ export default function App() {
                   });
                 }
               } else if (enemy.phase === 3) {
-                // Ring burst
                 for (let i = 0; i < 12; i++) {
                   const angle = (i / 12) * Math.PI * 2;
                   enemyBullets.current.push({
@@ -1306,18 +1311,13 @@ export default function App() {
       }
 
       if (enemy.isTurret) {
-        // Turret Logic
-        const now = Date.now();
         const shootInterval = 2000 - Math.min(1000, waveRef.current * 50);
-        if (now - (enemy.lastShotTime || 0) > shootInterval) {
-          enemy.lastShotTime = now;
+        if (currentTime - (enemy.lastShotTime || 0) > shootInterval) {
+          enemy.lastShotTime = currentTime;
           audio.playEnemyShoot(enemy.x + enemy.width / 2);
-          
-          // Target player
           const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
           const dy = playerPos.current.y - (enemy.y + enemy.height / 2);
           const dist = Math.sqrt(dx * dx + dy * dy);
-          
           enemyBullets.current.push({
             x: enemy.x + enemy.width / 2,
             y: enemy.y + enemy.height / 2,
@@ -1421,9 +1421,9 @@ export default function App() {
     });
 
     // Formation dive
-    const now = Date.now();
+    const currentDiveTime = Date.now();
     const diveInterval = Math.max(1200, 3000 - waveRef.current * 200);
-    if (now - lastDiveTime.current > diveInterval) {
+    if (currentDiveTime - lastDiveTime.current > diveInterval) {
       const aliveEnemies = enemies.current.filter(e => e.alive && e.state === 'IN_FORMATION');
       if (aliveEnemies.length > 0) {
         // Pick a leader
@@ -1472,7 +1472,7 @@ export default function App() {
           diver.turnY = turnY;
         });
         
-        lastDiveTime.current = now;
+        lastDiveTime.current = currentDiveTime;
         audio.playDive(leader.x + leader.width / 2);
       }
     }
@@ -2014,6 +2014,10 @@ export default function App() {
       // Dynamic tilt from Lerp
       ctx.rotate(playerTilt.current);
 
+      // Ship Scale (Overdrive)
+      const shipScale = 1 + (isOverdriveActive.current ? 0.1 : 0);
+      ctx.scale(shipScale, shipScale);
+
       // Hacked Glitch Effect
       if (isHackedRef.current) {
         const glitchOffset = (Math.random() - 0.5) * 10;
@@ -2082,9 +2086,20 @@ export default function App() {
       ctx.restore();
     }
 
-    // Wingman Rendering
-    if (hasWingman) {
-      ctx.save();
+      // Wingman Rendering
+      if (hasWingman) {
+        // Neon wire connection
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2);
+        ctx.lineTo(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
       ctx.translate(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
       ctx.scale(0.8, 0.8); // Slightly smaller
       
@@ -2483,19 +2498,26 @@ export default function App() {
 
   const loop = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    update();
-    draw(ctx);
+    const ctx = canvas?.getContext('2d');
+    
+    if (ctx) {
+      update();
+      draw(ctx);
+    }
+    
     requestRef.current = requestAnimationFrame(loop);
   };
 
   useEffect(() => {
-    requestRef.current = requestAnimationFrame(loop);
+    // Only start the loop if it's not already running
+    if (!requestRef.current) {
+      requestRef.current = requestAnimationFrame(loop);
+    }
     return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
     };
   }, [gameState, assets]);
 
@@ -2507,106 +2529,122 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#020205] text-white flex flex-col items-center justify-center font-mono overflow-hidden">
-      {/* HUD */}
-      <div className="w-full max-w-[600px] flex justify-between items-end mb-4 px-4">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Stage</span>
-            {isTouchDevice && (
-              <button 
-                onClick={toggleFullscreen}
-                className="p-2 bg-white/10 border border-white/20 rounded-lg hover:bg-white/20 active:scale-95 transition-all flex items-center gap-2"
-                title="Toggle Fullscreen"
-              >
-                <Maximize2 size={16} className={isFullscreen ? "text-[#00ffcc]" : "text-white"} />
-                <span className="text-[10px] uppercase font-bold tracking-wider">
-                  {isFullscreen ? "Exit Full" : "Fullscreen"}
-                </span>
-              </button>
-            )}
-          </div>
-          <span className="text-xl font-bold text-white tracking-tighter italic">{sectorName}</span>
-          <div className="flex flex-col mt-2">
-            <span className="text-[8px] text-gray-500 uppercase tracking-widest">Distance to Fortress</span>
-            <div className="w-32 h-1 bg-white/10 rounded-full mt-1 overflow-hidden">
-              <motion.div 
-                animate={{ width: `${(1 - distance / 25000) * 100}%` }}
-                className="h-full bg-[#00ffcc] shadow-[0_0_5px_#00ffcc]"
-              />
+      {/* Consolidated Compact HUD (Genius Designer Style) */}
+      <div className="w-full max-w-[600px] px-4 mb-3 flex flex-col gap-2 z-[100] relative">
+        {/* HUD Decorative Brackets */}
+        <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[#00ffcc]/30 rounded-tl-md" />
+        <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-[#00ffcc]/30 rounded-tr-md" />
+        <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-[#00ffcc]/30 rounded-bl-md" />
+        <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-[#00ffcc]/30 rounded-br-md" />
+
+        <div className="flex justify-between items-end">
+          {/* Left: Sector & Score */}
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1 h-3 bg-[#00ffcc] rounded-full animate-pulse" />
+              <span className="text-[10px] font-black text-[#00ffcc] uppercase tracking-[0.4em]">Sector {Math.min(5, Math.ceil(wave / 2))}-{wave % 2 === 0 ? 2 : 1}</span>
             </div>
-            <span className="text-[9px] text-[#00ffcc] mt-1 font-mono">{distance.toLocaleString()} KM</span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-white tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
+                {score.toLocaleString().padStart(8, '0')}
+              </span>
+              <span className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">PTS</span>
+            </div>
+          </div>
+
+          {/* Center: Dual Fighter Status (Floating) */}
+          <AnimatePresence>
+            {wingmanRef.current && (
+              <motion.div 
+                initial={{ scale: 0, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0, opacity: 0, y: 10 }}
+                className="absolute left-1/2 -translate-x-1/2 -top-6 flex items-center gap-2 px-3 py-1 bg-[#00ffcc]/10 border border-[#00ffcc]/40 rounded-full shadow-[0_0_20px_rgba(0,255,204,0.2)]"
+              >
+                <Zap className="w-3 h-3 text-[#00ffcc] fill-[#00ffcc] animate-pulse" />
+                <span className="text-[9px] font-black text-[#00ffcc] uppercase tracking-widest">Dual Mode Active</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Right: Integrity & Overdrive */}
+          <div className="flex flex-col items-end gap-2">
+            {/* Integrity Bars */}
+            <div className="flex items-center gap-3">
+              <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Integrity</span>
+              <div className="flex gap-1">
+                {[...Array(5)].map((_, i) => (
+                  <motion.div 
+                    key={i} 
+                    animate={i < lives ? { opacity: [0.7, 1, 0.7] } : {}}
+                    transition={{ duration: 2, repeat: Infinity, delay: i * 0.2 }}
+                    className={`w-4 h-1.5 rounded-sm transition-all duration-500 ${
+                      i < lives 
+                        ? 'bg-[#00ffcc] shadow-[0_0_10px_rgba(0,255,204,0.8)]' 
+                        : 'bg-white/5 border border-white/10'
+                    }`} 
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Overdrive Gauge */}
+            <div className="flex items-center gap-3">
+              <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
+              <div className="w-36 h-2 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative">
+                <motion.div 
+                  animate={{ width: `${(overdrive / MAX_OVERDRIVE) * 100}%` }}
+                  className={`h-full rounded-full transition-colors duration-300 ${
+                    overdrive >= MAX_OVERDRIVE 
+                      ? 'bg-[#ffcc00] shadow-[0_0_20px_rgba(255,204,0,1)]' 
+                      : 'bg-gradient-to-r from-[#33ccff] to-[#00ffcc]'
+                  }`}
+                />
+                {overdrive >= MAX_OVERDRIVE && (
+                  <motion.div 
+                    animate={{ opacity: [0, 1, 0] }}
+                    transition={{ duration: 0.5, repeat: Infinity }}
+                    className="absolute inset-0 bg-white/20"
+                  />
+                )}
+              </div>
+            </div>
           </div>
         </div>
-        
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">Score</span>
-          <span className="text-2xl font-bold text-[#00ffcc] tracking-tighter">{score.toString().padStart(6, '0')}</span>
-        </div>
-        
-        {combo > 1 && (
+
+        {/* Progress Bar (Full Width of HUD) */}
+        <div className="w-full h-[3px] bg-white/5 relative overflow-hidden rounded-full mt-1">
           <motion.div 
-            initial={{ scale: 0, opacity: 0, rotate: -20 }}
-            animate={{ 
-              scale: [1, 1.2, 1], 
-              opacity: 1, 
-              rotate: [0, 5, -5, 0],
-              color: combo > 10 ? '#ffcc00' : '#ff3366'
-            }}
-            transition={{ duration: 0.2 }}
-            key={combo}
-            className="flex flex-col items-center"
-          >
-            <span className="text-[10px] uppercase tracking-widest font-bold opacity-70">Combo</span>
-            <span className={`text-4xl font-black italic drop-shadow-[0_0_10px_currentColor]`}>x{combo}</span>
-          </motion.div>
-        )}
-
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Overdrive</span>
-          <div className="w-24 h-2 bg-black/50 border border-[#ff3366] rounded-full overflow-hidden">
-            <motion.div 
-              animate={{ width: `${overdrive}%` }}
-              className={`h-full ${overdrive >= 100 ? 'bg-white shadow-[0_0_10px_#fff]' : 'bg-[#ff3366]'}`}
-            />
-          </div>
-          {overdrive >= 100 && !isOverdriveActive.current && (
-            <span className="text-[8px] text-white animate-pulse mt-1 font-bold">READY [X]</span>
-          )}
-        </div>
-
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Wave</span>
-          <span className="text-xl font-bold text-[#ff33cc] tracking-tighter">{wave}</span>
-        </div>
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Scrap</span>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-[#00ffcc] rounded-full animate-pulse" />
-            <span className="text-xl font-bold text-[#00ffcc] tracking-tighter">{scrapCount}</span>
-          </div>
-        </div>
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em] mb-1">Lives</span>
-          <div className="flex gap-2 h-6">
-            {[...Array(Math.max(0, lives))].map((_, i) => (
-              <Rocket key={i} size={20} className="text-[#ff3366] -rotate-45" fill="currentColor" />
+            animate={{ width: `${(1 - distance / 25000) * 100}%` }}
+            className="h-full bg-gradient-to-r from-[#00ffcc] via-[#33ccff] to-[#00ffcc] shadow-[0_0_15px_rgba(0,255,204,0.6)]"
+          />
+          {/* Progress Markers */}
+          <div className="absolute inset-0 flex justify-between px-1">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="w-[1px] h-full bg-white/20" />
             ))}
           </div>
         </div>
-        <div className="flex flex-col items-end">
-          <span className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">High Score</span>
-          <span className="text-2xl font-bold text-[#ffcc00] tracking-tighter">{highScore.toString().padStart(6, '0')}</span>
-        </div>
       </div>
 
-      {/* Game Canvas Container */}
-      <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_50px_rgba(0,255,204,0.1)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-[3/4]">
+      {/* Game Canvas Container with Ambient Glow and Scanlines */}
+      <div className="relative border-4 md:border-8 border-[#1a1a2e] rounded-xl shadow-[0_0_80px_rgba(0,255,204,0.15)] overflow-hidden max-w-[95vw] max-h-[70vh] aspect-[3/4] group">
+        {/* Ambient Glow behind canvas */}
+        <div className="absolute inset-0 bg-[#00ffcc]/5 blur-3xl rounded-full opacity-30 group-hover:opacity-60 transition-opacity duration-1000 -z-10" />
+        
         <canvas
           ref={canvasRef}
           width={CANVAS_WIDTH}
           height={CANVAS_HEIGHT}
-          className="block w-full h-full object-contain bg-black"
+          className="block w-full h-full object-contain bg-black relative z-10"
+          style={{ imageRendering: 'pixelated' }}
         />
+
+        {/* Scanline Overlay */}
+        <div className="absolute inset-0 pointer-events-none z-20 opacity-[0.04] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
+        
+        {/* CRT Vignette */}
+        <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
         {/* Active Power-ups UI */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-2">
@@ -2749,10 +2787,11 @@ export default function App() {
 
           {gameState === 'LOADING' && (
             <motion.div
+              key="loading-screen"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-black flex flex-col items-center justify-center p-8 text-center z-[100]"
             >
               <Loader2 size={48} className="text-[#00ffcc] animate-spin mb-4" />
               <p className="text-[#00ffcc] uppercase tracking-[0.5em] text-sm animate-pulse">
@@ -2763,10 +2802,11 @@ export default function App() {
 
           {gameState === 'START' && (
             <motion.div
+              key="start-screen"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-4 md:p-8 text-center overflow-hidden"
+              className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-4 md:p-8 text-center overflow-hidden z-[100]"
             >
               <motion.div
                 animate={{ y: [0, -10, 0], rotate: [0, 3, -3, 0] }}
@@ -2847,9 +2887,10 @@ export default function App() {
 
           {gameState === 'GAME_OVER' && (
             <motion.div
+              key="game-over-screen"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-8 text-center"
+              className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-8 text-center z-[100]"
             >
               <Trophy size={64} className="text-[#ffcc00] mb-6 drop-shadow-[0_0_20px_rgba(255,204,0,0.3)]" />
               <h2 className="text-5xl font-black mb-2 text-[#ff3366] tracking-tighter">MISSION FAILED</h2>
@@ -2884,29 +2925,43 @@ export default function App() {
         />
       )}
 
-      {/* Mobile Overdrive Button (Floating) */}
+      {/* Mobile Overdrive Gauge Button (Floating Bottom Right) - Only on Touch Devices */}
       {gameState === 'PLAYING' && isTouchDevice && (
-        <div className="fixed bottom-8 right-8 flex flex-col gap-4 z-50">
+        <div className="fixed bottom-8 right-8 flex flex-col items-center gap-2 z-50">
           <button 
             onPointerDown={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = true; }}
             onPointerUp={(e) => { e.preventDefault(); keysPressed.current['TouchOverdrive'] = false; }}
-            className={`w-20 h-20 rounded-full border-2 flex flex-col items-center justify-center transition-all ${
+            className={`relative w-20 h-20 rounded-full border-2 overflow-hidden transition-all ${
               overdrive >= 100 
-                ? 'border-[#ff3366] bg-[#ff3366]/20 shadow-[0_0_20px_#ff3366] animate-pulse' 
-                : 'border-white/20 bg-white/5 opacity-50'
+                ? 'border-[#ff3366] shadow-[0_0_20px_#ff3366] animate-pulse' 
+                : 'border-white/20 bg-white/5'
             }`}
           >
-            <Zap size={32} className={overdrive >= 100 ? 'text-[#ff3366]' : 'text-white/40'} fill={overdrive >= 100 ? 'currentColor' : 'none'} />
-            <span className="text-[8px] font-bold mt-1 text-white/60">OVERDRIVE</span>
+            {/* Gauge Fill (Bottom to Top) */}
+            <motion.div 
+              animate={{ height: `${overdrive}%` }}
+              className="absolute bottom-0 left-0 w-full bg-[#ff3366]/40"
+            />
+            
+            <div className="relative z-10 flex flex-col items-center justify-center h-full">
+              <Zap size={32} className={overdrive >= 100 ? 'text-white' : 'text-white/40'} fill={overdrive >= 100 ? 'white' : 'none'} />
+              <span className="text-[8px] font-bold mt-1 text-white/60">OVERDRIVE</span>
+            </div>
           </button>
         </div>
       )}
 
-      {/* Footer */}
+      {/* Footer & Fullscreen */}
       <div className="mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">
         <span>Arcade Revision 2.5</span>
         <span className="w-1 h-1 bg-gray-800 rounded-full" />
-        <span>Sector 7-G Defense System</span>
+        <button 
+          onClick={toggleFullscreen}
+          className="hover:text-white transition-colors flex items-center gap-1"
+        >
+          <Maximize2 size={10} />
+          <span>{isFullscreen ? "Exit Full" : "Fullscreen"}</span>
+        </button>
       </div>
     </div>
   );

@@ -451,6 +451,33 @@ class RetroAudio {
     osc.stop(this.ctx.currentTime + 1.0);
   }
 
+  playTractorBeam() {
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.5);
+    
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    lfo.frequency.value = 10;
+    lfoGain.gain.value = 100;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    
+    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    lfo.start();
+    osc.start();
+    lfo.stop(this.ctx.currentTime + 0.5);
+    osc.stop(this.ctx.currentTime + 0.5);
+  }
+
   playBGM() {
     if (!this.ctx || !this.masterGain) return;
     this.stopBGM();
