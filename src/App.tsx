@@ -1032,28 +1032,38 @@ export default function App() {
       if (asteroidSpawnTimer.current > spawnRate) {
         asteroidSpawnTimer.current = 0;
         
-        // Ensure a gap: Divide screen into 3 lanes, pick 2 to spawn in
-        const lanes = [0, 1, 2];
-        const emptyLane = Math.floor(Math.random() * 3);
-        const spawnLanes = lanes.filter(l => l !== emptyLane);
+        // Ensure a gap: Pick a random "Safe X" corridor that will be clear of asteroids
+        const safeX = Math.random() * (CANVAS_WIDTH - 160) + 80;
+        const safeWidth = 120;
         
-        spawnLanes.forEach(lane => {
-          const size = isAsteroidBelt ? Math.random() * 80 + 60 : Math.random() * 40 + 20;
-          const x = (lane * (CANVAS_WIDTH / 3)) + (Math.random() * (CANVAS_WIDTH / 3 - size));
-          const vertices = [];
-          for (let i = 0; i < 8; i++) {
-            vertices.push(0.8 + Math.random() * 0.4);
+        // Divide remaining space into potential spawn zones
+        const spawnZones = [
+          { min: 0, max: safeX - safeWidth / 2 },
+          { min: safeX + safeWidth / 2, max: CANVAS_WIDTH }
+        ].filter(z => z.max - z.min > 40);
+        
+        spawnZones.forEach(zone => {
+          const numInZone = isAsteroidBelt ? 2 : 1;
+          for(let i=0; i<numInZone; i++) {
+            const size = isAsteroidBelt ? Math.random() * 50 + 30 : Math.random() * 40 + 20;
+            const x = zone.min + Math.random() * (zone.max - zone.min - size);
+            if (x < 0 || x > CANVAS_WIDTH - size) continue;
+
+            const vertices = [];
+            for (let j = 0; j < 8; j++) {
+              vertices.push(0.8 + Math.random() * 0.4);
+            }
+            asteroids.current.push({
+              x: x + size / 2,
+              y: -150,
+              size: size,
+              speed: isAsteroidBelt ? 2.2 : 3.5,
+              rotation: Math.random() * Math.PI * 2,
+              vr: (Math.random() - 0.5) * 0.05,
+              hp: isAsteroidBelt ? 40 : 15,
+              vertices: vertices
+            });
           }
-          asteroids.current.push({
-            x: x + size / 2,
-            y: -150,
-            size: size,
-            speed: isAsteroidBelt ? 3 : 5,
-            rotation: Math.random() * Math.PI * 2,
-            vr: (Math.random() - 0.5) * 0.05,
-            hp: isAsteroidBelt ? 999999 : 15, // Indestructible in Stage 2
-            vertices: vertices
-          });
         });
       }
     }
@@ -1096,6 +1106,30 @@ export default function App() {
 
           if (a.hp <= 0) {
             audio.playExplosion(a.x);
+            
+            // Splitting Logic: If size is large enough, spawn smaller fragments
+            if (a.size > 40) {
+              const numFragments = Math.floor(Math.random() * 2) + 2; // 2-3 fragments
+              for(let i=0; i<numFragments; i++) {
+                const fragSize = a.size * 0.5;
+                const angle = (i / numFragments) * Math.PI * 2 + Math.random() * 0.5;
+                const fragVertices = [];
+                for (let j = 0; j < 8; j++) {
+                  fragVertices.push(0.8 + Math.random() * 0.4);
+                }
+                asteroids.current.push({
+                  x: a.x + Math.cos(angle) * (a.size / 2),
+                  y: a.y + Math.sin(angle) * (a.size / 2),
+                  size: fragSize,
+                  speed: a.speed * 1.2, // Fragments are faster
+                  rotation: Math.random() * Math.PI * 2,
+                  vr: (Math.random() - 0.5) * 0.1,
+                  hp: 10,
+                  vertices: fragVertices
+                });
+              }
+            }
+
             // Destruction particles (Neon burst)
             for (let i = 0; i < 15; i++) {
               particles.current.push({
@@ -2096,9 +2130,12 @@ export default function App() {
       ctx.translate(a.x, a.y);
       ctx.rotate(a.rotation);
       ctx.shadowBlur = 10;
-      ctx.shadowColor = a.hp > 1000 ? '#ffcc00' : '#555';
-      ctx.strokeStyle = a.hp > 1000 ? '#ffcc00' : '#888';
-      ctx.lineWidth = a.hp > 1000 ? 3 : 2;
+      
+      const isLarge = a.size > 35;
+      ctx.shadowColor = isLarge ? '#00ffcc' : '#888';
+      ctx.strokeStyle = isLarge ? '#00ffcc' : '#888';
+      ctx.lineWidth = isLarge ? 2.5 : 1.5;
+      
       ctx.beginPath();
       for (let i = 0; i < 8; i++) {
         const angle = (i / 8) * Math.PI * 2;
@@ -2109,19 +2146,19 @@ export default function App() {
       ctx.closePath();
       ctx.stroke();
       
-      // Inner wireframe for indestructible asteroids
-      if (a.hp > 1000) {
+      // Inner wireframe for large asteroids
+      if (isLarge) {
         ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
+        ctx.lineWidth = 1;
         for (let i = 0; i < 8; i+=2) {
           const angle = (i / 8) * Math.PI * 2;
-          const r = a.size * (a.vertices ? a.vertices[i] : 1);
-          if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
-          else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+          const r = a.size * 0.4;
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
         }
-        ctx.closePath();
         ctx.stroke();
       }
-      
       ctx.restore();
     });
 
