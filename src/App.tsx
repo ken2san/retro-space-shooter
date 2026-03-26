@@ -179,13 +179,11 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>('LOADING');
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
-  const [lives, setLives] = useState(3);
   const [wave, setWave] = useState(1);
   const [sectorName, setSectorName] = useState('Outer Rim');
-  const [distance, setDistance] = useState(25000);
   const [scrapCount, setScrapCount] = useState(0);
-  
-  // Leveling System
+  const [integrity, setIntegrity] = useState(100);
+  const integrityRef = useRef(100);
   const [level, setLevel] = useState(1);
   const [xp, setXp] = useState(0);
   const [xpToNextLevel, setXpToNextLevel] = useState(100);
@@ -202,7 +200,6 @@ export default function App() {
   const wingmanPos = useRef({ x: 0, y: 0 });
 
   // Game state refs for the loop
-  const livesRef = useRef(3);
   const waveRef = useRef(1);
   const invulnerableUntil = useRef(0);
   const playerPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
@@ -262,7 +259,8 @@ export default function App() {
   const activeEffects = useRef<Record<string, number>>({});
   const overdriveGauge = useRef(0);
   const [overdrive, setOverdrive] = useState(0);
-  const isOverdriveActive = useRef(false);
+  const [isOverdriveActive, setIsOverdriveActive] = useState(false);
+  const isOverdriveActiveRef = useRef(false);
   const overdriveEndTime = useRef(0);
   const pauseStartTime = useRef(0);
 
@@ -278,8 +276,8 @@ export default function App() {
   const isHackedRef = useRef(false);
   const stageStartTime = useRef(0);
   const ambushTimer = useRef(0);
-  const [survivalTime, setSurvivalTime] = useState(45);
-  const survivalTimerRef = useRef(45);
+  const [survivalTime, setSurvivalTime] = useState(30);
+  const survivalTimerRef = useRef(30);
   const blocks = useRef<Obstacle[]>([]);
   const lastBlockRowY = useRef(0);
 
@@ -473,9 +471,10 @@ export default function App() {
   const handlePlayerHit = () => {
     if (Date.now() < invulnerableUntil.current) return;
     
-    const newLives = livesRef.current - 1;
-    livesRef.current = newLives;
-    setLives(newLives);
+    const damage = 20; // 5 hits to die
+    const newIntegrity = Math.max(0, integrityRef.current - damage);
+    integrityRef.current = newIntegrity;
+    setIntegrity(newIntegrity);
     
     // Lose wingman on hit
     if (wingmanRef.current) {
@@ -486,7 +485,7 @@ export default function App() {
     
     isHackedRef.current = false; // Clear hacked state on hit
     
-    if (newLives <= 0) {
+    if (newIntegrity <= 0) {
       setGameState('GAME_OVER');
       setBossHealth(null);
       audio.playGameOver();
@@ -547,15 +546,17 @@ export default function App() {
     } else {
       // Normal Waves strictly following the 5-stage design
       if (stage === 1) {
-        // Level 1: Scouts only, light formation
-        const count = waveNum === 1 ? 6 : 10;
+        // Level 1: Popcorn wave! Many weak enemies for immediate satisfaction
+        const count = waveNum === 1 ? 12 : 18;
         for (let i = 0; i < count; i++) {
-          newEnemies.push(createEnemy(100 + (i % 5) * 100, 80 + Math.floor(i / 5) * 80, 0));
+          const row = Math.floor(i / 6);
+          const col = i % 6;
+          newEnemies.push(createEnemy(80 + col * 80, 60 + row * 60, 0));
         }
       } else if (stage === 2) {
-        // Level 2: Scouts + Asteroids (handled in update)
-        for (let i = 0; i < 10; i++) {
-          newEnemies.push(createEnemy(100 + (i % 5) * 100, 60 + Math.floor(i / 5) * 80, 0));
+        // Level 2: Scouts + Asteroids + Sparse Walls
+        for (let i = 0; i < 15; i++) {
+          newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 70, 0));
         }
       } else if (stage === 3) {
         // Level 3: Snipers + Turrets
@@ -593,9 +594,15 @@ export default function App() {
   const handleScrapCollection = (s: Scrap) => {
     setScrapCount(prev => prev + 1);
     setScore(prev => prev + 10);
-    const xpGain = 10;
+    const xpGain = 15; // Increased XP gain
     xpRef.current += xpGain;
     setXp(xpRef.current);
+
+    // Give Overdrive fuel on scrap collection
+    if (!isOverdriveActiveRef.current) {
+      overdriveGauge.current = Math.min(100, overdriveGauge.current + 2);
+      setOverdrive(overdriveGauge.current);
+    }
 
     if (xpRef.current >= xpToNextLevelRef.current) {
       xpRef.current -= xpToNextLevelRef.current;
@@ -691,7 +698,7 @@ export default function App() {
     }
     
     // Resume overdrive timer if active
-    if (isOverdriveActive.current) {
+    if (isOverdriveActiveRef.current) {
       overdriveEndTime.current += (Date.now() - pauseStartTime.current);
     }
     
@@ -710,11 +717,10 @@ export default function App() {
       const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
       setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
       
-      setDistance(prev => Math.max(0, prev - 1000));
       initEnemies(waveRef.current);
       
-      survivalTimerRef.current = 45;
-      setSurvivalTime(45);
+      survivalTimerRef.current = 30;
+      setSurvivalTime(30);
       blocks.current = [];
       
       setWaveTitle(true);
@@ -730,16 +736,24 @@ export default function App() {
 
   const generateMazeRow = () => {
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
-    // Only generate maze blocks from Stage 4 onwards (The Canyon/Chase)
-    if (currentStage < 4) return;
+    // Introduce maze blocks earlier (Stage 2) but keep it sparse initially
+    if (currentStage < 2) return;
 
     const rowY = -100;
     const blockWidth = CANVAS_WIDTH / 10;
     const blockHeight = 100;
 
-    // Density increases with wave
-    const wallDensity = 0.05 + (waveRef.current - 7) * 0.02; // Very sparse initially
-    const destructibleDensity = 0.1 + (waveRef.current - 7) * 0.03;
+    // Density increases with stage and wave
+    let wallDensity = 0.02;
+    let destructibleDensity = 0.05;
+
+    if (currentStage === 3) {
+      wallDensity = 0.04;
+      destructibleDensity = 0.08;
+    } else if (currentStage >= 4) {
+      wallDensity = 0.06 + (waveRef.current - 7) * 0.02;
+      destructibleDensity = 0.12 + (waveRef.current - 7) * 0.03;
+    }
 
     for (let i = 0; i < 10; i++) {
       const rand = Math.random();
@@ -801,10 +815,8 @@ export default function App() {
     audio.init();
     audio.playBGM();
     setScore(0);
-    setLives(3);
     setWave(1);
     setSectorName('Tutorial - SECTOR 1');
-    setDistance(25000);
     setScrapCount(0);
     setLevel(1);
     setXp(0);
@@ -824,7 +836,8 @@ export default function App() {
     chainLightningRef.current = 0;
     drones.current = [];
     damageNumbers.current = [];
-    livesRef.current = 3;
+    integrityRef.current = 100;
+    setIntegrity(100);
     waveRef.current = 1;
     setHasWingman(false);
     wingmanRef.current = false;
@@ -840,14 +853,13 @@ export default function App() {
     blocks.current = [];
     obstacles.current = [];
     lastObstacleTime.current = 0;
-    survivalTimerRef.current = 45;
-    setSurvivalTime(45);
+    survivalTimerRef.current = 30;
+    setSurvivalTime(30);
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
     audio.playStageStart();
     setGameState('PLAYING');
-    saveGame();
   };
 
   // Input handling
@@ -950,17 +962,17 @@ export default function App() {
     };
   }, [gameState, showUpgrade]);
 
-  const handleGraze = (x: number, y: number) => {
-    if (Date.now() % 5 !== 0) return; // Throttling
-    audio.playGraze();
-    grazeCount.current++;
-    setScore(s => s + 10);
-    
-    // Boost overdrive
-    if (!isOverdriveActive.current) {
-      overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
-      setOverdrive(overdriveGauge.current);
-    }
+    const handleGraze = (x: number, y: number) => {
+      if (Date.now() % 5 !== 0) return; // Throttling
+      audio.playGraze();
+      grazeCount.current++;
+      setScore(s => s + 10);
+      
+      // Boost overdrive
+      if (!isOverdriveActiveRef.current) {
+        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
+        setOverdrive(overdriveGauge.current);
+      }
 
     // Slow motion effect
     timeScale.current = 0.8;
@@ -982,7 +994,8 @@ export default function App() {
   };
 
   const activateOverdrive = () => {
-    isOverdriveActive.current = true;
+    isOverdriveActiveRef.current = true;
+    setIsOverdriveActive(true);
     const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
     const duration = hasFrenzy ? 15000 : 10000;
     overdriveEndTime.current = Date.now() + duration;
@@ -997,10 +1010,33 @@ export default function App() {
 
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
     const isAsteroidBelt = currentStage === 2;
+    const isFinalFront = currentStage === 5;
 
     // Apply slow-mo recovery
     if (timeScale.current < 1.0) {
       timeScale.current = Math.min(1.0, timeScale.current + 0.005);
+    }
+
+    // Spawn Asteroids
+    if ((isAsteroidBelt || isFinalFront) && !isWarping.current) {
+      const spawnRate = isAsteroidBelt ? 0.04 : 0.02;
+      if (Math.random() < spawnRate) {
+        const size = 30 + Math.random() * 60;
+        const vertices = [];
+        for (let i = 0; i < 8; i++) {
+          vertices.push(0.8 + Math.random() * 0.4);
+        }
+        asteroids.current.push({
+          x: Math.random() * CANVAS_WIDTH,
+          y: -100,
+          size,
+          speed: 2 + Math.random() * 3,
+          rotation: Math.random() * Math.PI * 2,
+          vr: (Math.random() - 0.5) * 0.05,
+          hp: Math.floor(size / 10),
+          vertices
+        });
+      }
     }
 
     // Wingman Logic
@@ -1017,7 +1053,7 @@ export default function App() {
       // Wingman firing
       if (keysPressed.current['Space'] || keysPressed.current['TouchFire']) {
         const now = Date.now();
-        if (now - lastShotTime.current > (isOverdriveActive.current ? 75 : 150)) {
+        if (now - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
           bullets.current.push({
             x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
             y: wingmanPos.current.y,
@@ -1067,7 +1103,7 @@ export default function App() {
 
     // Player movement with Lerp
     const speedMultiplier = 1 + (speedRef.current - 1) * 0.15;
-    const currentSpeed = (isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
+    const currentSpeed = (isOverdriveActiveRef.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
 
     // Relative Movement Input
     let moveX = 0;
@@ -1100,7 +1136,7 @@ export default function App() {
     playerTilt.current += (vx * 0.2 - playerTilt.current) * 0.1;
 
     // Overdrive Ramming Logic
-    if (isOverdriveActive.current) {
+    if (isOverdriveActiveRef.current) {
       const ramRect = {
         x: playerPos.current.x,
         y: playerPos.current.y,
@@ -1116,9 +1152,23 @@ export default function App() {
             ramRect.y + ramRect.h > enemy.y) {
           enemy.health = 0;
           enemy.alive = false;
-          createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 30);
+          // Bigger explosion during Overdrive
+          const explosionSize = isOverdriveActiveRef.current ? 60 : 30;
+          createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', explosionSize);
           setScore(s => s + 500);
           audio.playExplosion(enemy.x);
+
+          // Drop scrap during ramming
+          const scrapCount = isOverdriveActiveRef.current ? 5 : 1;
+          for (let i = 0; i < scrapCount; i++) {
+            scraps.current.push({
+              x: enemy.x + enemy.width / 2,
+              y: enemy.y + enemy.height / 2,
+              vx: (Math.random() - 0.5) * 8,
+              vy: (Math.random() - 0.5) * 8,
+              life: 1
+            });
+          }
         }
       });
 
@@ -1222,10 +1272,9 @@ export default function App() {
     });
 
     // Nano-Repair (Regen)
-    if (regenRef.current > 0 && livesRef.current < 3) {
-      livesRef.current += regenRef.current;
-      if (livesRef.current > 3) livesRef.current = 3;
-      setLives(Math.floor(livesRef.current));
+    if (regenRef.current > 0 && integrityRef.current < 100) {
+      integrityRef.current = Math.min(100, integrityRef.current + (regenRef.current * 0.01));
+      setIntegrity(integrityRef.current);
     }
 
     // Survival Timer Logic
@@ -1253,7 +1302,7 @@ export default function App() {
       block.y += scrollSpeed;
       
       // Collision with player
-      if (block.hp > 0 && !isOverdriveActive.current && Date.now() > invulnerableUntil.current) {
+      if (block.hp > 0 && !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current) {
         if (playerPos.current.x < block.x + block.width &&
             playerPos.current.x + PLAYER_WIDTH > block.x &&
             playerPos.current.y < block.y + block.height &&
@@ -1320,6 +1369,18 @@ export default function App() {
           if (a.hp <= 0) {
             audio.playExplosion(a.x);
             
+            // Drop scrap from asteroids
+            const scrapCount = Math.floor(a.size / 20);
+            for (let i = 0; i < scrapCount; i++) {
+              scraps.current.push({
+                x: a.x,
+                y: a.y,
+                vx: (Math.random() - 0.5) * 6,
+                vy: (Math.random() - 0.5) * 6,
+                life: 1
+              });
+            }
+
             // Splitting Logic: If size is large enough, spawn smaller fragments
             if (a.size > 40) {
               const numFragments = Math.floor(Math.random() * 2) + 2; // 2-3 fragments
@@ -1432,9 +1493,10 @@ export default function App() {
     obstacles.current = obstacles.current.filter(obs => obs.y < CANVAS_HEIGHT + 400 && obs.hp > 0);
 
     // Overdrive Logic
-    if (isOverdriveActive.current) {
+    if (isOverdriveActiveRef.current) {
       if (Date.now() > overdriveEndTime.current) {
-        isOverdriveActive.current = false;
+        isOverdriveActiveRef.current = false;
+        setIsOverdriveActive(false);
         overdriveGauge.current = 0;
         setOverdrive(0);
       } else {
@@ -1458,14 +1520,14 @@ export default function App() {
     if (flash.current < 0) flash.current = 0;
 
     // Shooting
-    const isRapid = (activeEffects.current['RAPIDFIRE'] > Date.now()) || isOverdriveActive.current;
-    const shootInterval = isOverdriveActive.current ? 80 : isRapid ? 120 : 250;
+    const isRapid = (activeEffects.current['RAPIDFIRE'] > Date.now()) || isOverdriveActiveRef.current;
+    const shootInterval = isOverdriveActiveRef.current ? 80 : isRapid ? 120 : 250;
     
     if (keysPressed.current['Space'] || keysPressed.current['TouchFire']) {
       const now = Date.now();
       if (now - lastShotTime.current > shootInterval) {
         const isMulti = activeEffects.current['MULTISHOT'] > Date.now();
-        const isOver = isOverdriveActive.current;
+        const isOver = isOverdriveActiveRef.current;
         const bulletDamage = 1 + (firepowerRef.current - 1) * 0.5;
         const bulletSize = 4 + (firepowerRef.current - 1) * 2;
 
@@ -2016,7 +2078,7 @@ export default function App() {
               }
               
               // Overdrive gauge increase
-              if (!isOverdriveActive.current) {
+              if (!isOverdriveActiveRef.current) {
                 overdriveGauge.current = Math.min(100, overdriveGauge.current + 20);
                 setOverdrive(overdriveGauge.current);
               }
@@ -2045,6 +2107,24 @@ export default function App() {
           }
 
           enemy.alive = false;
+          
+          // Overdrive Chain Explosion
+          if (isOverdriveActiveRef.current) {
+            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 50);
+            // Damage nearby enemies
+            enemies.current.forEach(other => {
+              if (other.alive && other !== enemy) {
+                const dx = (other.x + other.width/2) - (enemy.x + enemy.width/2);
+                const dy = (other.y + other.height/2) - (enemy.y + enemy.height/2);
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < 150) {
+                  other.health = (other.health || 0) - 50;
+                  if (other.health <= 0) other.alive = false;
+                }
+              }
+            });
+          }
+
           // Chrono Trigger
           if (relicsRef.current.some(r => r.id === 'CHRONO') && Math.random() < 0.05) {
             timeScale.current = 0.3;
@@ -2052,14 +2132,18 @@ export default function App() {
           bullets.current.splice(bIdx, 1);
           
           // Drop scrap
-          if (Math.random() < 0.6) {
-            scraps.current.push({
-              x: enemy.x + enemy.width / 2,
-              y: enemy.y + enemy.height / 2,
-              vx: (Math.random() - 0.5) * 4,
-              vy: (Math.random() - 0.5) * 4,
-              life: 1
-            });
+          const scrapChance = isOverdriveActiveRef.current ? 1.0 : 0.6;
+          const scrapCount = isOverdriveActiveRef.current ? 3 : 1;
+          if (Math.random() < scrapChance) {
+            for (let i = 0; i < scrapCount; i++) {
+              scraps.current.push({
+                x: enemy.x + enemy.width / 2,
+                y: enemy.y + enemy.height / 2,
+                vx: (Math.random() - 0.5) * (isOverdriveActiveRef.current ? 8 : 4),
+                vy: (Math.random() - 0.5) * (isOverdriveActiveRef.current ? 8 : 4),
+                life: 1
+              });
+            }
           }
           
           // Combo system
@@ -2077,7 +2161,7 @@ export default function App() {
           setScore((s) => s + basePoints + comboBonus);
           
           // Overdrive gauge increase
-          if (!isOverdriveActive.current) {
+          if (!isOverdriveActiveRef.current) {
             const gaugeGain = (enemy.isDiving ? 3 : 1) * (1 + comboRef.current * 0.1);
             overdriveGauge.current = Math.min(100, overdriveGauge.current + gaugeGain);
             setOverdrive(overdriveGauge.current);
@@ -2156,7 +2240,7 @@ export default function App() {
 
     if (playerHit && Date.now() > invulnerableUntil.current) {
       // Auto-bomb if overdrive is full
-      if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+      if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current) {
         activateOverdrive();
         invulnerableUntil.current = Date.now() + 2000;
         createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#ffffff', 30);
@@ -2173,7 +2257,7 @@ export default function App() {
       }
 
       // Overdrive invulnerability
-      if (isOverdriveActive.current) return;
+      if (isOverdriveActiveRef.current) return;
 
       audio.playPlayerHit();
       shake.current = 20;
@@ -2199,17 +2283,17 @@ export default function App() {
         });
       }
 
-      if (livesRef.current > 1) {
-        livesRef.current -= 1;
-        setLives(livesRef.current);
+      if (integrityRef.current > 20) {
+        integrityRef.current -= 20;
+        setIntegrity(integrityRef.current);
         invulnerableUntil.current = Date.now() + 2000;
         enemyBullets.current = []; // Clear bullets to give a chance to recover
         if (comboRef.current > 5) audio.playComboBreak();
         comboRef.current = 0;
         setCombo(0);
       } else {
-        livesRef.current = 0;
-        setLives(0);
+        integrityRef.current = 0;
+        setIntegrity(0);
         audio.stopBGM();
         setGameState('GAME_OVER');
       }
@@ -2469,7 +2553,7 @@ export default function App() {
     });
 
     // Overdrive Screen Effect
-    if (isOverdriveActive.current) {
+    if (isOverdriveActiveRef.current) {
       ctx.save();
       ctx.globalCompositeOperation = 'screen';
       const pulse = Math.sin(Date.now() / 100) * 0.1;
@@ -2585,9 +2669,9 @@ export default function App() {
       ctx.rotate(playerTilt.current);
 
       // Ship Scale (Overdrive)
-      const shipScale = 1 + (isOverdriveActive.current ? 0.1 : 0);
+      const shipScale = 1 + (isOverdriveActiveRef.current ? 0.1 : 0);
       ctx.scale(shipScale, shipScale);
-
+      
       // Hacked Glitch Effect
       if (isHackedRef.current) {
         const glitchOffset = (Math.random() - 0.5) * 10;
@@ -2595,7 +2679,7 @@ export default function App() {
         ctx.strokeStyle = Math.random() > 0.5 ? '#ff00ff' : '#00ffff';
         ctx.shadowColor = ctx.strokeStyle;
       }
-
+      
       // Graze Circle
       ctx.strokeStyle = isHackedRef.current ? 'rgba(255, 0, 255, 0.2)' : 'rgba(0, 255, 204, 0.2)';
       ctx.setLineDash([5, 5]);
@@ -2636,12 +2720,12 @@ export default function App() {
       // Engine/Afterburner Glow
       const engineFlicker = Math.random() * 5;
       ctx.shadowBlur = 15 + engineFlicker;
-      ctx.shadowColor = isOverdriveActive.current ? '#ff3366' : '#33ccff';
-      ctx.fillStyle = isOverdriveActive.current ? '#ff3366' : '#33ccff';
+      ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#33ccff';
+      ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#33ccff';
       // Left Engine
-      ctx.fillRect(-12, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActive.current ? 20 : 10) + engineFlicker);
+      ctx.fillRect(-12, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActiveRef.current ? 20 : 10) + engineFlicker);
       // Right Engine
-      ctx.fillRect(6, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActive.current ? 20 : 10) + engineFlicker);
+      ctx.fillRect(6, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActiveRef.current ? 20 : 10) + engineFlicker);
 
       // Shield Effect
       if (activeEffects.current['SHIELD'] > Date.now()) {
@@ -2699,14 +2783,14 @@ export default function App() {
     ctx.shadowBlur = 15;
     bullets.current.forEach((b) => {
       const size = b.size || 4;
-      ctx.fillStyle = isOverdriveActive.current ? '#ff3366' : '#00ffcc';
-      ctx.shadowColor = isOverdriveActive.current ? '#ff3366' : '#00ffcc';
-      ctx.fillRect(b.x, b.y, size, isOverdriveActive.current ? size * 5 : size * 3);
+      ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
+      ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
+      ctx.fillRect(b.x, b.y, size, isOverdriveActiveRef.current ? size * 5 : size * 3);
     });
     
     // Enemy Bullets
-    ctx.fillStyle = '#ff3366';
-    ctx.shadowColor = '#ff3366';
+    ctx.fillStyle = '#ff9900'; // Changed to Orange for better visibility against player's pink Overdrive
+    ctx.shadowColor = '#ff9900';
     enemyBullets.current.forEach((b) => {
       ctx.beginPath();
       ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
@@ -3055,7 +3139,7 @@ export default function App() {
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
     // Chromatic Aberration
-    const caIntensity = (isOverdriveActive.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5);
+    const caIntensity = (isOverdriveActiveRef.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5);
     if (caIntensity > 0.5) {
       mainCtx.globalCompositeOperation = 'screen';
       // Red
@@ -3204,13 +3288,13 @@ export default function App() {
             <div className="flex items-center gap-3">
               <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Integrity</span>
               <div className="flex gap-1">
-                {[...Array(5)].map((_, i) => (
+                {[...Array(10)].map((_, i) => (
                   <motion.div 
                     key={i} 
-                    animate={i < lives ? { opacity: [0.7, 1, 0.7] } : {}}
-                    transition={{ duration: 2, repeat: Infinity, delay: i * 0.2 }}
-                    className={`w-4 h-1.5 rounded-sm transition-all duration-500 ${
-                      i < lives 
+                    animate={i < (integrity / 10) ? { opacity: [0.7, 1, 0.7] } : {}}
+                    transition={{ duration: 2, repeat: Infinity, delay: i * 0.1 }}
+                    className={`w-2 h-1.5 rounded-sm transition-all duration-500 ${
+                      i < (integrity / 10)
                         ? 'bg-[#00ffcc] shadow-[0_0_10px_rgba(0,255,204,0.8)]' 
                         : 'bg-white/5 border border-white/10'
                     }`} 
@@ -3225,31 +3309,31 @@ export default function App() {
                 <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
                 <button 
                   onClick={() => {
-                    if (overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+                    if (overdrive >= MAX_OVERDRIVE && !isOverdriveActive) {
                       activateOverdrive();
                     }
                   }}
-                  disabled={overdrive < MAX_OVERDRIVE || isOverdriveActive.current}
-                  className={`w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative cursor-pointer transition-all ${overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current ? 'border-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.4)]' : ''}`}
+                  disabled={overdrive < MAX_OVERDRIVE || isOverdriveActive}
+                  className={`w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative cursor-pointer transition-all ${overdrive >= MAX_OVERDRIVE && !isOverdriveActive ? 'border-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.4)]' : ''}`}
                 >
                   <motion.div 
-                    animate={overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current 
+                    animate={overdrive >= MAX_OVERDRIVE && !isOverdriveActive 
                       ? { 
                           width: '100%',
                           backgroundColor: ['#ff3366', '#ff336633', '#ff3366'],
                         } 
                       : { 
                           width: `${(overdrive / MAX_OVERDRIVE) * 100}%`,
-                          backgroundColor: isOverdriveActive.current ? '#ff3366' : '#00ffcc'
+                          backgroundColor: isOverdriveActive ? '#ff3366' : '#00ffcc'
                         }
                     }
-                    transition={overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current 
+                    transition={overdrive >= MAX_OVERDRIVE && !isOverdriveActive 
                       ? { duration: 0.5, repeat: Infinity } 
                       : { duration: 0.3 }
                     }
                     className="h-full rounded-full shadow-[0_0_20px_rgba(255,51,102,0.6)]"
                   />
-                  {overdrive >= MAX_OVERDRIVE && !isOverdriveActive.current && (
+                  {overdrive >= MAX_OVERDRIVE && !isOverdriveActive && (
                     <div className="absolute inset-0 flex items-center justify-center">
                       <span className="text-[7px] text-white font-black uppercase tracking-tighter animate-pulse">Tap to Burst</span>
                     </div>
@@ -3263,7 +3347,7 @@ export default function App() {
         {/* Progress Bar (Survival Timer) */}
         <div className="w-full h-[3px] bg-white/5 relative overflow-hidden rounded-full mt-1">
           <motion.div 
-            animate={{ width: `${(1 - survivalTime / 45) * 100}%` }}
+            animate={{ width: `${(1 - survivalTime / 30) * 100}%` }}
             className="h-full bg-gradient-to-r from-[#ff3366] via-[#ffcc00] to-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]"
           />
           <div className="absolute inset-0 flex items-center justify-center">
@@ -3539,21 +3623,9 @@ export default function App() {
                   <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-[-20deg]" />
                   <span className="relative z-10 flex items-center justify-center gap-2">
                     <Play className="w-5 h-5 fill-current" />
-                    New Mission
+                    START RUN
                   </span>
                 </button>
-
-                {hasSaveData && (
-                  <button
-                    onClick={loadGame}
-                    className="group relative px-8 py-4 bg-transparent border-2 border-[#ff3366] text-[#ff3366] font-black uppercase tracking-[0.2em] overflow-hidden transition-all hover:bg-[#ff3366]/10 hover:scale-105 active:scale-95"
-                  >
-                    <span className="relative z-10 flex items-center justify-center gap-2">
-                      <RotateCcw className="w-5 h-5" />
-                      Continue
-                    </span>
-                  </button>
-                )}
               </div>
               <div className="mt-8 md:mt-16 grid grid-cols-3 gap-4 md:gap-8 text-[8px] md:text-[10px] text-gray-500 uppercase tracking-[0.4em]">
                 <div className="flex flex-col gap-1 md:gap-2">
