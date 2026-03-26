@@ -275,6 +275,9 @@ export default function App() {
   const warpFactor = useRef(0);
   const warpStartTime = useRef(0);
   const isHackedRef = useRef(false);
+  const stageStartTime = useRef(0);
+  const ambushTimer = useRef(0);
+  const [survivalTime, setSurvivalTime] = useState(0);
 
   // Initialize stars and offscreen canvas
   useEffect(() => {
@@ -836,6 +839,8 @@ export default function App() {
   const update = () => {
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
+    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+
     // Apply slow-mo recovery
     if (timeScale.current < 1.0) {
       timeScale.current = Math.min(1.0, timeScale.current + 0.005);
@@ -906,6 +911,12 @@ export default function App() {
     // Player movement with Lerp
     const speedMultiplier = 1 + (speedRef.current - 1) * 0.15;
     const currentSpeed = (isOverdriveActive.current ? PLAYER_SPEED * 1.5 : PLAYER_SPEED) * speedMultiplier;
+
+    // Hacked Jitter
+    if (isHackedRef.current) {
+      targetPos.current.x += (Math.random() - 0.5) * 15;
+      targetPos.current.y += (Math.random() - 0.5) * 15;
+    }
 
     if (keysPressed.current['ArrowLeft'] || keysPressed.current['KeyA']) {
       targetPos.current.x = Math.max(0, targetPos.current.x - currentSpeed);
@@ -1022,13 +1033,12 @@ export default function App() {
     }
 
     // Update Asteroids
-    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
     const isAsteroidBelt = currentStage === 2;
     
     // Asteroid Spawning Logic (Route Guarantee)
     if ((isAsteroidBelt || currentStage === 5) && !isWarping.current) {
       asteroidSpawnTimer.current += 16 * timeScale.current;
-      const spawnRate = isAsteroidBelt ? 600 : 1200;
+      const spawnRate = isAsteroidBelt ? 400 : 1200; // More frequent in belt
       if (asteroidSpawnTimer.current > spawnRate) {
         asteroidSpawnTimer.current = 0;
         
@@ -1358,7 +1368,6 @@ export default function App() {
     const currentEnemyDiveSpeed = (ENEMY_DIVE_SPEED + waveRef.current * 0.2) * timeScale.current;
     const formationOffset = (Math.sin(Date.now() / 1200) * 60);
     const currentTime = Date.now();
-    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
     
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
@@ -1407,23 +1416,42 @@ export default function App() {
         // Tractor Beam Logic (Mid-Boss)
         if (waveRef.current === 6) {
           enemy.tractorBeamTimer += 16 * timeScale.current;
+          
+          // Warning phase (Charging)
+          if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 2500 && enemy.tractorBeamTimer < 3000) {
+            enemy.tractorBeamX = enemy.x + enemy.width / 2;
+          }
+
           if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 3000) {
             enemy.isTractorBeaming = true;
             enemy.tractorBeamTimer = 0;
             enemy.tractorBeamX = enemy.x + enemy.width / 2;
             audio.playTractorBeam();
           }
+
           if (enemy.isTractorBeaming) {
-            if (enemy.tractorBeamTimer > 2500) {
+            if (enemy.tractorBeamTimer > 3000) {
               enemy.isTractorBeaming = false;
               enemy.tractorBeamTimer = 0;
+              isHackedRef.current = false; // Clear hacked state when beam stops
             }
-            // Check collision with beam
-            const beamWidth = 100;
+            
+            // Check collision and apply force
+            const beamWidth = 120;
             const px = playerPos.current.x + PLAYER_WIDTH / 2;
-            if (Math.abs(px - enemy.tractorBeamX) < beamWidth / 2 && playerPos.current.y > enemy.y) {
+            const py = playerPos.current.y + PLAYER_HEIGHT / 2;
+            
+            if (Math.abs(px - enemy.tractorBeamX) < beamWidth / 2 && py > enemy.y) {
+              // Pull towards center of beam
+              playerPos.current.x += (enemy.tractorBeamX - px) * 0.05;
+              
+              // Damage over time
+              if (currentTime % 500 < 20) {
+                handlePlayerHit();
+              }
+              
               isHackedRef.current = true;
-              glitch.current = 10;
+              glitch.current = 15;
             }
           }
         }
@@ -1432,9 +1460,9 @@ export default function App() {
           enemy.y += 1; // Entry
         } else {
           // Horizontal movement
-          let moveSpeed = stage === 4 ? 4 : 1.5;
+          let moveSpeed = currentStage === 4 ? 4 : 1.5;
           
-          if (stage === 5 && enemy.phase === 3) {
+          if (currentStage === 5 && enemy.phase === 3) {
             if (!enemy.diveStartX) {
               enemy.diveStartX = currentTime;
             }
@@ -1464,13 +1492,13 @@ export default function App() {
 
           // Boss shooting
           let shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
-          if (stage === 5) shootInterval *= 0.7;
+          if (currentStage === 5) shootInterval *= 0.7;
           
           if (currentTime - (enemy.lastShotTime || 0) > shootInterval) {
             enemy.lastShotTime = currentTime;
             audio.playEnemyShoot(enemy.x + enemy.width / 2);
 
-            if (stage === 3 && !enemy.isTractorBeaming) {
+            if (currentStage === 3 && !enemy.isTractorBeaming) {
               const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
               const dy = playerPos.current.y - (enemy.y + enemy.height);
               const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1482,7 +1510,7 @@ export default function App() {
                   vy: (dy / dist) * 4
                 });
               }
-            } else if (stage === 5) {
+            } else if (currentStage === 5) {
               if (enemy.phase === 1) {
                 const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
                 const dy = playerPos.current.y - (enemy.y + enemy.height);
@@ -1999,8 +2027,52 @@ export default function App() {
     });
     particles.current = particles.current.filter(p => p.life > 0);
 
-    const aliveEnemies = enemies.current.filter(e => e.alive);
-    if (aliveEnemies.length === 0 && !isWarping.current && !showUpgrade) {
+    // Wave Completion Logic
+    const isTimeBasedStage = currentStage === 2; // Asteroid Belt is survival based
+    
+    let isWaveCleared = false;
+    if (isTimeBasedStage) {
+      // Survive for 45 seconds
+      if (!stageStartTime.current) stageStartTime.current = Date.now();
+      const elapsed = (Date.now() - stageStartTime.current) / 1000;
+      setSurvivalTime(Math.max(0, 45 - Math.floor(elapsed)));
+      if (elapsed >= 45) {
+        isWaveCleared = true;
+        stageStartTime.current = 0;
+      }
+      
+      // Keep spawning enemies if they are low
+      if (enemies.current.filter(e => e.alive).length < 6 && !isWarping.current) {
+        const x = Math.random() * (CANVAS_WIDTH - 40);
+        const e: Enemy = {
+          x, y: -50, width: 35, height: 35, alive: true, type: 0,
+          isDiving: true, isReturning: false, diveX: (Math.random() - 0.5) * 4, diveY: 5,
+          originX: x, originY: 100, state: 'DIVING', tractorBeamTimer: 0, isTractorBeaming: false, tractorBeamX: 0, stunnedUntil: 0
+        };
+        enemies.current.push(e);
+      }
+    } else {
+      isWaveCleared = enemies.current.every(e => !e.alive) && !isWarping.current && !showUpgrade;
+    }
+
+    // Ambush System (VS Style constant action)
+    if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage) {
+      ambushTimer.current += 16 * timeScale.current;
+      if (ambushTimer.current > 10000) { // Every 10 seconds
+        ambushTimer.current = 0;
+        const side = Math.random() > 0.5 ? -50 : CANVAS_WIDTH + 50;
+        for(let i=0; i<3; i++) {
+          const e: Enemy = {
+            x: side, y: 100 + i * 100, width: 35, height: 35, alive: true, type: 2,
+            isDiving: true, isReturning: false, diveX: side < 0 ? 6 : -6, diveY: 2,
+            originX: side, originY: 100 + i * 100, state: 'DIVING', tractorBeamTimer: 0, isTractorBeaming: false, tractorBeamX: 0, stunnedUntil: 0
+          };
+          enemies.current.push(e);
+        }
+      }
+    }
+
+    if (isWaveCleared && gameState === 'PLAYING') {
       isWarping.current = true;
       warpStartTime.current = Date.now();
       audio.playWaveClear();
@@ -2037,6 +2109,7 @@ export default function App() {
     if (shake.current > 0) shake.current *= 0.9;
     if (flash.current > 0) flash.current *= 0.9;
 
+    const aliveEnemies = enemies.current.filter(e => e.alive);
     if (aliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
       setGameState('GAME_OVER');
     }
@@ -2462,16 +2535,19 @@ export default function App() {
         }
 
         // Tractor Beam Rendering
-        if (enemy.isTractorBeaming) {
+        if (enemy.isTractorBeaming || (enemy.tractorBeamTimer > 2500 && waveRef.current === 6)) {
           ctx.save();
-          const beamWidth = 100 + Math.sin(Date.now() / 50) * 20;
+          const isCharging = enemy.tractorBeamTimer > 2500 && !enemy.isTractorBeaming;
+          const beamWidth = isCharging ? 4 : 120 + Math.sin(Date.now() / 50) * 20;
+          const beamAlpha = isCharging ? 0.3 : 0.8;
+          
           const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
-          gradient.addColorStop(0, 'rgba(0, 255, 255, 0.8)');
-          gradient.addColorStop(1, 'rgba(0, 255, 255, 0.1)');
+          gradient.addColorStop(0, `rgba(0, 255, 255, ${beamAlpha})`);
+          gradient.addColorStop(1, `rgba(0, 255, 255, ${beamAlpha * 0.1})`);
           
           ctx.fillStyle = gradient;
           ctx.shadowColor = '#00ffff';
-          ctx.shadowBlur = 20;
+          ctx.shadowBlur = isCharging ? 5 : 20;
           ctx.beginPath();
           ctx.moveTo(-20, enemy.height / 2);
           ctx.lineTo(20, enemy.height / 2);
@@ -2480,14 +2556,16 @@ export default function App() {
           ctx.closePath();
           ctx.fill();
           
-          // Add some scanning lines inside the beam
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.lineWidth = 2;
-          const scanY = (Date.now() % 1000) / 1000 * CANVAS_HEIGHT;
-          ctx.beginPath();
-          ctx.moveTo(-beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
-          ctx.lineTo(beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
-          ctx.stroke();
+          if (!isCharging) {
+            // Add some scanning lines inside the beam
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 2;
+            const scanY = (Date.now() % 1000) / 1000 * CANVAS_HEIGHT;
+            ctx.beginPath();
+            ctx.moveTo(-beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
+            ctx.lineTo(beamWidth / 2 * (scanY / CANVAS_HEIGHT), scanY);
+            ctx.stroke();
+          }
           ctx.restore();
         }
 
@@ -3005,6 +3083,29 @@ export default function App() {
             )
           ))}
         </div>
+
+        {/* Survival Timer (Stage 2) */}
+        <AnimatePresence>
+          {Math.min(5, Math.ceil(wave / 2)) === 2 && gameState === 'PLAYING' && !isWarping.current && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="absolute top-4 right-4 flex flex-col items-end gap-1"
+            >
+              <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">Survival_Protocol</span>
+              <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
+                {survivalTime}s
+              </div>
+              <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
+                <motion.div 
+                  animate={{ width: `${(survivalTime / 45) * 100}%` }}
+                  className="h-full bg-[#00ffcc]"
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Boss Health Bar */}
         <AnimatePresence>
