@@ -14,16 +14,15 @@ const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 800;
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 50;
-const PLAYER_SPEED = 5.0; // Synchronized speed
-const FOLLOW_SMOOTHNESS = 0.15;
+const PLAYER_SPEED = 6.0; // Increased for better sync
+const FOLLOW_SMOOTHNESS = 0.12; // Slightly snappier
 const GRAZE_DISTANCE = 40;
 const MAX_OVERDRIVE = 100;
-const BULLET_SPEED = 8; // Synchronized speed
-const ENEMY_DIVE_SPEED = 2.5; // Synchronized speed
-const ENEMY_BULLET_SPEED = 3.5; // Synchronized speed
-const ENEMY_ROWS = 5;
-const ENEMY_COLS = 8;
-const ENEMY_SPACING = 55;
+const BULLET_SPEED = 10; 
+const ENEMY_DIVE_SPEED = 3.0;
+const ENEMY_BULLET_SPEED = 4.0;
+const SURVIVAL_DURATION = 60000; // 60 seconds per stage
+const OBSTACLE_SIZE = 60;
 
 type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR' | 'UPGRADE' | 'RELIC_SELECT';
 
@@ -153,7 +152,7 @@ interface Obstacle {
   y: number;
   width: number;
   height: number;
-  type: 'BUILDING' | 'WALL' | 'PILLAR';
+  type: 'DESTRUCTIBLE' | 'INDESTRUCTIBLE';
   hp: number;
   maxHp: number;
   color: string;
@@ -182,7 +181,8 @@ export default function App() {
   const [lives, setLives] = useState(3);
   const [wave, setWave] = useState(1);
   const [sectorName, setSectorName] = useState('Outer Rim');
-  const [distance, setDistance] = useState(25000);
+  const [distance, setDistance] = useState(0); // Repurposed for progress
+  const [survivalProgress, setSurvivalProgress] = useState(0);
   const [scrapCount, setScrapCount] = useState(0);
   
   // Leveling System
@@ -277,6 +277,9 @@ export default function App() {
   const isHackedRef = useRef(false);
   const stageStartTime = useRef(0);
   const ambushTimer = useRef(0);
+  const mazePathX = useRef(CANVAS_WIDTH / 2);
+  const mazeTargetX = useRef(CANVAS_WIDTH / 2);
+  const lastMazeRowY = useRef(-OBSTACLE_SIZE);
   const [survivalTime, setSurvivalTime] = useState(0);
 
   // Initialize stars and offscreen canvas
@@ -397,6 +400,16 @@ export default function App() {
   const handlePlayerHit = () => {
     if (Date.now() < invulnerableUntil.current) return;
     
+    // Auto-bomb logic
+    if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActive.current) {
+      activateOverdrive();
+      invulnerableUntil.current = Date.now() + 3000; // Longer invulnerability for auto-bomb
+      flash.current = 1.0;
+      shake.current = 40;
+      createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#ffcc00', 100);
+      return;
+    }
+
     const newLives = livesRef.current - 1;
     livesRef.current = newLives;
     setLives(newLives);
@@ -748,8 +761,8 @@ export default function App() {
       e.preventDefault();
       
       const touch = e.touches[0];
-      const dx = (touch.clientX - touchStartPos.current.x) * 1.2;
-      const dy = (touch.clientY - touchStartPos.current.y) * 1.2;
+      const dx = (touch.clientX - touchStartPos.current.x);
+      const dy = (touch.clientY - touchStartPos.current.y);
 
       targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + dx));
       targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + dy));
@@ -835,11 +848,90 @@ export default function App() {
     audio.playOverdrive();
   };
 
+  const spawnMazeRow = (y: number) => {
+    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const pathWidth = Math.max(180, 300 - stage * 20); // Narrower as stage increases
+    
+    // Shift target path
+    if (Math.random() > 0.9) {
+      mazeTargetX.current = Math.random() * (CANVAS_WIDTH - pathWidth) + pathWidth / 2;
+    }
+    
+    // Smoothly move path center
+    mazePathX.current += (mazeTargetX.current - mazePathX.current) * 0.05;
+    
+    const leftEdge = mazePathX.current - pathWidth / 2;
+    const rightEdge = mazePathX.current + pathWidth / 2;
+    
+    // Fill row with blocks
+    for (let x = 0; x < CANVAS_WIDTH; x += OBSTACLE_SIZE) {
+      const isPath = x + OBSTACLE_SIZE > leftEdge && x < rightEdge;
+      
+      if (!isPath) {
+        // Wall
+        obstacles.current.push({
+          id: Date.now() + x,
+          x, y,
+          width: OBSTACLE_SIZE,
+          height: OBSTACLE_SIZE,
+          type: 'INDESTRUCTIBLE',
+          hp: 1000,
+          maxHp: 1000,
+          color: '#1a1a2e'
+        });
+      } else if (Math.random() > 0.85) {
+        // Destructible block in path
+        obstacles.current.push({
+          id: Date.now() + x,
+          x, y,
+          width: OBSTACLE_SIZE,
+          height: OBSTACLE_SIZE,
+          type: 'DESTRUCTIBLE',
+          hp: 20 + stage * 10,
+          maxHp: 20 + stage * 10,
+          color: '#ff3366'
+        });
+      }
+    }
+  };
+
   // Game Loop
   const update = () => {
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
     const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    
+    // Survival Progress
+    if (!stageStartTime.current) stageStartTime.current = Date.now();
+    const elapsed = Date.now() - stageStartTime.current;
+    const progress = Math.min(1, elapsed / SURVIVAL_DURATION);
+    setSurvivalProgress(progress);
+    setSurvivalTime(Math.ceil((SURVIVAL_DURATION - elapsed) / 1000));
+
+    // Maze Spawning
+    const scrollSpeed = 3 + currentStage * 0.5;
+    lastMazeRowY.current += scrollSpeed;
+    if (lastMazeRowY.current >= 0) {
+      spawnMazeRow(-OBSTACLE_SIZE);
+      lastMazeRowY.current = -OBSTACLE_SIZE;
+    }
+
+    // Continuous Enemy Spawning
+    if (!isWarping.current && progress < 1) {
+      ambushTimer.current += 16 * timeScale.current;
+      const spawnRate = Math.max(500, 2000 - currentStage * 300);
+      if (ambushTimer.current > spawnRate) {
+        ambushTimer.current = 0;
+        const x = Math.random() * (CANVAS_WIDTH - 40);
+        const type = Math.floor(Math.random() * Math.min(3, currentStage));
+        const e: Enemy = {
+          x, y: -50, width: 35, height: 35, alive: true, type,
+          isDiving: true, isReturning: false, diveX: (Math.random() - 0.5) * 4, diveY: 4 + currentStage,
+          originX: x, originY: 100, state: 'DIVING', tractorBeamTimer: 0, isTractorBeaming: false, tractorBeamX: 0, stunnedUntil: 0
+        };
+        enemies.current.push(e);
+      }
+    }
 
     // Apply slow-mo recovery
     if (timeScale.current < 1.0) {
@@ -1160,36 +1252,9 @@ export default function App() {
     });
     asteroids.current = asteroids.current.filter(a => a.y < CANVAS_HEIGHT + 100 && a.hp > 0);
 
-    // Update Obstacles (Sector 16+: Fortress Gates & The Core)
-    if (currentStage === 5 && !isWarping.current) {
-      const now = Date.now();
-      if (now - lastObstacleTime.current > 3000) {
-        lastObstacleTime.current = now;
-        obstaclePattern.current = (obstaclePattern.current + 1) % 4;
-        
-        // Generate pattern
-        if (obstaclePattern.current === 0) {
-          // Left wall
-          obstacles.current.push({ id: now, x: 0, y: -200, width: 200, height: 150, type: 'WALL', hp: 50, maxHp: 50, color: '#ff3366' });
-          // Right wall
-          obstacles.current.push({ id: now + 1, x: CANVAS_WIDTH - 200, y: -200, width: 200, height: 150, type: 'WALL', hp: 50, maxHp: 50, color: '#ff3366' });
-        } else if (obstaclePattern.current === 1) {
-          // Center pillar
-          obstacles.current.push({ id: now, x: CANVAS_WIDTH / 2 - 100, y: -200, width: 200, height: 200, type: 'BUILDING', hp: 100, maxHp: 100, color: '#33ccff' });
-        } else if (obstaclePattern.current === 2) {
-          // Zigzag
-          obstacles.current.push({ id: now, x: 100, y: -200, width: 150, height: 150, type: 'PILLAR', hp: 30, maxHp: 30, color: '#ffcc00' });
-          obstacles.current.push({ id: now + 1, x: CANVAS_WIDTH - 250, y: -400, width: 150, height: 150, type: 'PILLAR', hp: 30, maxHp: 30, color: '#ffcc00' });
-        } else {
-          // Narrow corridor
-          obstacles.current.push({ id: now, x: 0, y: -200, width: CANVAS_WIDTH / 2 - 60, height: 300, type: 'WALL', hp: 200, maxHp: 200, color: '#ff3366' });
-          obstacles.current.push({ id: now + 1, x: CANVAS_WIDTH / 2 + 60, y: -200, width: CANVAS_WIDTH / 2 - 60, height: 300, type: 'WALL', hp: 200, maxHp: 200, color: '#ff3366' });
-        }
-      }
-    }
-
     obstacles.current.forEach(obs => {
-      obs.y += 2; // Scroll down
+      const scrollSpeed = 3 + currentStage * 0.5;
+      obs.y += scrollSpeed * timeScale.current;
       
       // Collision with player
       const px = playerPos.current.x;
@@ -1197,36 +1262,33 @@ export default function App() {
       if (px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
           py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height && Date.now() > invulnerableUntil.current) {
         handlePlayerHit();
-      }
-      
-      // Collision with wingman
-      if (wingmanRef.current) {
-        const wx = wingmanPos.current.x;
-        const wy = wingmanPos.current.y;
-        if (wx + PLAYER_WIDTH > obs.x && wx < obs.x + obs.width &&
-            wy + PLAYER_HEIGHT > obs.y && wy < obs.y + obs.height) {
-          setHasWingman(false);
-          wingmanRef.current = false;
-          createExplosion(wx + PLAYER_WIDTH / 2, wy + PLAYER_HEIGHT / 2, '#ff33cc', 30);
-          audio.playExplosion(wx);
-        }
+        if (obs.type === 'DESTRUCTIBLE') obs.hp = 0;
       }
       
       // Collision with bullets
       bullets.current.forEach(b => {
         if (b.x > obs.x && b.x < obs.x + obs.width &&
             b.y > obs.y && b.y < obs.y + obs.height) {
-          obs.hp -= (b.damage || 1);
-          b.y = -100; // Remove bullet
-          if (obs.hp <= 0) {
-            audio.playExplosion(obs.x + obs.width / 2);
-            createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
-            setScore(s => s + 200);
+          if (obs.type === 'DESTRUCTIBLE') {
+            obs.hp -= (b.damage || 1);
+            b.y = -100; // Remove bullet
+            if (obs.hp <= 0) {
+              audio.playExplosion(obs.x + obs.width / 2);
+              createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 40);
+              setScore(s => s + 50);
+            }
+          } else {
+            // Indestructible blocks just block bullets
+            b.y = -100;
+            // Small spark
+            particles.current.push({
+              x: b.x, y: b.y, vx: (Math.random() - 0.5) * 4, vy: 2, life: 5, maxLife: 5, color: '#ffffff', size: 1
+            });
           }
         }
       });
     });
-    obstacles.current = obstacles.current.filter(obs => obs.y < CANVAS_HEIGHT + 400 && obs.hp > 0);
+    obstacles.current = obstacles.current.filter(obs => obs.y < CANVAS_HEIGHT + 100 && obs.hp > 0);
 
     // Overdrive Logic
     if (isOverdriveActive.current) {
