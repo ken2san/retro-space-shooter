@@ -497,20 +497,40 @@ class RetroAudio {
     osc.stop(this.ctx.currentTime + 0.5);
   }
 
-  playBGM() {
+  playBGM(stage: number = 1) {
     if (!this.ctx || !this.masterGain) return;
     this.stopBGM();
 
-    const bassNotes = [130.81, 130.81, 155.56, 174.61, 130.81, 130.81, 196.00, 174.61];
-    const leadNotes = [0, 261.63, 311.13, 349.23, 0, 392.00, 349.23, 311.13];
-    const speed = 125; // 120 BPM (125ms per 16th note)
+    // Stage-specific musical themes
+    // Stage 1: Basic Techno (Driving)
+    // Stage 2: Dark/Ambient Techno (Asteroid Belt)
+    // Stage 3: Industrial/Aggressive Techno (Maze)
+    // Stage 4: Melodic/Fast Techno (Chase)
+    // Stage 5: Epic/Final Techno (Final Front)
+    
+    const scales = [
+      [130.81, 155.56, 174.61, 196.00], // C Minor (Stage 1)
+      [123.47, 146.83, 164.81, 185.00], // B Minor (Stage 2 - Darker)
+      [110.00, 130.81, 146.83, 164.81], // A Minor (Stage 3 - Industrial)
+      [146.83, 174.61, 196.00, 220.00], // D Minor (Stage 4 - Fast)
+      [130.81, 155.56, 174.61, 196.00, 207.65, 233.08] // C Minor + Extra (Stage 5 - Epic)
+    ];
+
+    const currentScale = scales[(stage - 1) % scales.length];
+    const speed = stage === 4 ? 110 : 125; // Faster for chase stage
 
     this.bgmInterval = window.setInterval(() => {
       if (!this.ctx || !this.masterGain) return;
       
       const step = this.bgmStep % 16;
-      const bassFreq = bassNotes[Math.floor(step / 2) % bassNotes.length];
-      const leadFreq = leadNotes[Math.floor(step / 2) % leadNotes.length];
+      
+      // Global filter sweep for more "musical" techno
+      const sweepFreq = 1000 + Math.sin(this.bgmStep * 0.05) * 800;
+      const globalFilter = this.ctx.createBiquadFilter();
+      globalFilter.type = 'lowpass';
+      globalFilter.frequency.value = sweepFreq;
+      globalFilter.Q.value = 1;
+      globalFilter.connect(this.masterGain);
       
       // Kick Drum on 1, 5, 9, 13
       if (step % 4 === 0) {
@@ -522,66 +542,67 @@ class RetroAudio {
         kickGain.gain.setValueAtTime(0.4, this.ctx.currentTime);
         kickGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
         kickOsc.connect(kickGain);
-        kickGain.connect(this.masterGain);
+        kickGain.connect(globalFilter);
         kickOsc.start();
         kickOsc.stop(this.ctx.currentTime + 0.1);
 
-        // Add a bit of noise for the "click"
-        const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.02, this.ctx.sampleRate);
+        // Click for the kick
+        const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.01, this.ctx.sampleRate);
         const noiseData = noiseBuffer.getChannelData(0);
         for(let i=0; i<noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
         const noise = this.ctx.createBufferSource();
         noise.buffer = noiseBuffer;
         const noiseGain = this.ctx.createGain();
         noiseGain.gain.setValueAtTime(0.1, this.ctx.currentTime);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.02);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.01);
         noise.connect(noiseGain);
-        noiseGain.connect(this.masterGain);
+        noiseGain.connect(globalFilter);
         noise.start();
       }
 
-      // Snare/Hi-hat on 3, 7, 11, 15
-      if (step % 4 === 2) {
+      // Snare/Hi-hat on off-beats
+      if (step % 4 === 2 || (stage >= 3 && step % 2 === 1 && Math.random() > 0.7)) {
         const hatBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.05, this.ctx.sampleRate);
         const hatData = hatBuffer.getChannelData(0);
         for(let i=0; i<hatData.length; i++) hatData[i] = Math.random() * 2 - 1;
         const hat = this.ctx.createBufferSource();
         hat.buffer = hatBuffer;
         const hatGain = this.ctx.createGain();
-        hatGain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+        hatGain.gain.setValueAtTime(step % 4 === 2 ? 0.05 : 0.02, this.ctx.currentTime);
         hatGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
         hat.connect(hatGain);
-        hatGain.connect(this.masterGain);
+        hatGain.connect(globalFilter);
         hat.start();
       }
 
-      // Bass on every 8th note
+      // Bassline
       if (step % 2 === 0) {
+        const bassFreq = currentScale[Math.floor(this.bgmStep / 8) % currentScale.length];
         const bassOsc = this.ctx.createOscillator();
         const bassGain = this.ctx.createGain();
         bassOsc.type = 'sawtooth';
         
-        // Low pass filter for the bass
         const filter = this.ctx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.value = 400;
+        filter.frequency.value = stage === 2 ? 200 : 400; // Muffled for asteroid belt
 
         bassOsc.frequency.setValueAtTime(bassFreq / 2, this.ctx.currentTime);
-        bassGain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+        bassGain.gain.setValueAtTime(0.1, this.ctx.currentTime);
         bassGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
         
         bassOsc.connect(filter);
         filter.connect(bassGain);
-        bassGain.connect(this.masterGain);
+        bassGain.connect(globalFilter);
         bassOsc.start();
         bassOsc.stop(this.ctx.currentTime + 0.1);
       }
 
-      // Lead (syncopated)
-      if (leadFreq > 0 && (step % 3 === 0 || step === 7 || step === 14)) {
+      // Lead Synth (Arpeggio/Syncopated)
+      if (step % 3 === 0 || step === 7 || step === 14) {
+        const leadFreq = currentScale[Math.floor(this.bgmStep / 4) % currentScale.length] * 2;
         const leadOsc = this.ctx.createOscillator();
         const leadGain = this.ctx.createGain();
-        leadOsc.type = 'square';
+        leadOsc.type = stage === 3 ? 'square' : 'sawtooth';
         
         const leadFilter = this.ctx.createBiquadFilter();
         leadFilter.type = 'bandpass';
@@ -594,7 +615,7 @@ class RetroAudio {
         
         leadOsc.connect(leadFilter);
         leadFilter.connect(leadGain);
-        leadGain.connect(this.masterGain);
+        leadGain.connect(globalFilter);
         leadOsc.start();
         leadOsc.stop(this.ctx.currentTime + 0.2);
       }

@@ -375,7 +375,8 @@ export default function App() {
     setGameState('PLAYING');
     initEnemies(saveData.wave);
     audio.init();
-    audio.playBGM();
+    const stage = Math.min(5, Math.ceil(saveData.wave / 2));
+    audio.playBGM(stage);
     audio.playStageStart();
   };
 
@@ -678,6 +679,7 @@ export default function App() {
     
     setWaveTitle(true);
     audio.playStageStart();
+    audio.playBGM(stage);
     setTimeout(() => setWaveTitle(false), 2000);
     
     setTimeout(() => {
@@ -865,7 +867,7 @@ export default function App() {
 
   const startGame = () => {
     audio.init();
-    audio.playBGM();
+    audio.playBGM(1);
     setScore(0);
     setWave(1);
     setSectorName('Tutorial - SECTOR 1');
@@ -1087,7 +1089,7 @@ export default function App() {
 
     // Spawn Asteroids
     if ((isAsteroidBelt || isFinalFront) && !isWarping.current) {
-      const spawnRate = isAsteroidBelt ? 0.04 : 0.02;
+      const spawnRate = isAsteroidBelt ? 0.02 : 0.02;
       if (Math.random() < spawnRate) {
         const size = 30 + Math.random() * 60;
         const vertices = [];
@@ -2401,7 +2403,7 @@ export default function App() {
       }
       
       // Keep spawning enemies if they are low
-      if (enemies.current.filter(e => e.alive).length < 6 && !isWarping.current) {
+      if (enemies.current.filter(e => e.alive).length < 4 && !isWarping.current) {
         const x = Math.random() * (CANVAS_WIDTH - 40);
         const e: Enemy = {
           x, y: -50, width: 35, height: 35, alive: true, type: 0,
