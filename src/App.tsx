@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2, Shield, Cpu, Heart, Users, Activity } from 'lucide-react';
+import { Rocket, Trophy, Play, RotateCcw, Loader2, Zap, Maximize2, Shield, Cpu, Heart, Users, Activity, MousePointer2 } from 'lucide-react';
 import { generateGameAssets } from './services/assetGenerator';
 import { audio } from './services/audio';
 
@@ -14,7 +14,7 @@ const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 800;
 const PLAYER_WIDTH = 50;
 const PLAYER_HEIGHT = 50;
-const PLAYER_SPEED = 5.0; // Synchronized speed
+const PLAYER_SPEED = 3.5; // Reduced from 5.0
 const FOLLOW_SMOOTHNESS = 0.15;
 const GRAZE_DISTANCE = 40;
 const MAX_OVERDRIVE = 100;
@@ -24,7 +24,14 @@ const ENEMY_BULLET_SPEED = 3.5; // Synchronized speed
 const ENEMY_ROWS = 5;
 const ENEMY_COLS = 8;
 const ENEMY_SPACING = 55;
-const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+// --- Performance Constants ---
+const MAX_PARTICLES = isMobile ? 150 : 500;
+const MAX_TRAILS = isMobile ? 20 : 60;
+const MAX_BULLETS = isMobile ? 100 : 300;
+const MAX_ENEMY_BULLETS = isMobile ? 150 : 400;
+const ENABLE_SHADOWS = !isMobile;
 
 type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR' | 'UPGRADE' | 'RELIC_SELECT';
 
@@ -68,7 +75,7 @@ interface Enemy {
   isTractorBeaming: boolean;
   tractorBeamX: number;
   // Entry path properties
-  state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING' | 'TRACTOR_BEAM' | 'SWARM' | 'LASER' | 'DEAD';
+  state: 'ENTERING' | 'IN_FORMATION' | 'DIVING' | 'RETURNING' | 'TRACTOR_BEAM' | 'SWARM' | 'LASER' | 'DEAD' | 'BOSS';
   path?: { x: number, y: number }[];
   pathIndex?: number;
   entryDelay?: number;
@@ -77,6 +84,14 @@ interface Enemy {
   stunnedUntil: number;
   speedScale: number;
   amplitudeScale: number;
+  shield?: number;
+  maxShield?: number;
+  tentacles?: {
+    segments: { x: number, y: number, angle: number }[];
+    baseAngle: number;
+    targetAngle: number;
+    length: number;
+  }[];
 }
 
 interface Particle {
@@ -102,24 +117,30 @@ interface Trail {
   width: number;
 }
 
-const NeonShip = ({ className = "" }: { className?: string }) => (
+const NeonShip = ({ className = "", tension = 0 }: { className?: string, tension?: number }) => (
   <svg viewBox="0 0 100 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <filter id="glow">
-        <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+        <feGaussianBlur stdDeviation={2.5 + tension * 2} result="coloredBlur"/>
         <feMerge>
           <feMergeNode in="coloredBlur"/>
           <feMergeNode in="SourceGraphic"/>
         </feMerge>
       </filter>
     </defs>
-    {/* Wings */}
-    <path d="M50 20 L85 75 L50 65 L15 75 Z" stroke="#00ffcc" strokeWidth="3" filter="url(#glow)" strokeLinejoin="round" />
+    {/* Wings - They 'flex' with tension */}
+    <path 
+      d={`M50 20 L${85 + tension * 5} ${75 - tension * 5} L50 65 L${15 - tension * 5} ${75 - tension * 5} Z`} 
+      stroke="#00ffcc" 
+      strokeWidth={3 + tension} 
+      filter="url(#glow)" 
+      strokeLinejoin="round" 
+    />
     {/* Cockpit */}
     <path d="M50 35 L65 60 L50 55 L35 60 Z" stroke="#33ccff" strokeWidth="2" filter="url(#glow)" strokeLinejoin="round" />
     {/* Engine Glow */}
-    <circle cx="50" cy="70" r="8" fill="#ff3366" filter="url(#glow)" opacity="0.6">
-      <animate attributeName="r" values="6;10;6" dur="0.2s" repeatCount="indefinite" />
+    <circle cx="50" cy="70" r={8 + tension * 10} fill={tension > 0.5 ? "#ffcc00" : "#ff3366"} filter="url(#glow)" opacity={0.6 + tension * 0.4}>
+      <animate attributeName="r" values={`${8 + tension * 5};${12 + tension * 10};${8 + tension * 5}`} dur="0.2s" repeatCount="indefinite" />
       <animate attributeName="opacity" values="0.4;0.8;0.4" dur="0.2s" repeatCount="indefinite" />
     </circle>
   </svg>
@@ -156,7 +177,8 @@ interface Asteroid {
 enum BossType {
   TRACTOR = 'TRACTOR',
   SWARM = 'SWARM',
-  LASER = 'LASER'
+  LASER = 'LASER',
+  TENTACLE = 'TENTACLE'
 }
 
 interface Obstacle {
@@ -205,6 +227,7 @@ export default function App() {
   const [sectorName, setSectorName] = useState('Outer Rim');
   const [scrapCount, setScrapCount] = useState(0);
   const [integrity, setIntegrity] = useState(100);
+  const lastContinuousSpawnTime = useRef(0);
   const integrityRef = useRef(100);
   const [level, setLevel] = useState(1);
   const [xp, setXp] = useState(0);
@@ -226,7 +249,14 @@ export default function App() {
   const invulnerableUntil = useRef(0);
   const playerPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
   const targetPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
+  const playerVel = useRef({ x: 0, y: 0 }); // Added velocity for inertia
   const playerTilt = useRef(0);
+  const playerScale = useRef({ x: 1, y: 1 });
+  const inputVel = useRef({ x: 0, y: 0 });
+  const inputHistory = useRef<{ x: number, y: number, t: number }[]>([]);
+  const isSnapping = useRef(0); // Counter for frames of reduced damping
+  const lastInputPos = useRef({ x: 0, y: 0 });
+  const lastInputTime = useRef(0);
   const asteroidSpawnTimer = useRef(0);
   const lastAsteroidX = useRef(0);
   const timeScale = useRef(1.0);
@@ -263,6 +293,8 @@ export default function App() {
   const lastHitTime = useRef(0);
   const stars = useRef<{x: number, y: number, size: number, speed: number, opacity: number}[]>([]);
   const [combo, setCombo] = useState(0);
+  const trippyIntensity = useRef(0);
+  const pulseRef = useRef(0);
   const [relics, setRelics] = useState<{id: string, label: string}[]>([]);
   const relicsRef = useRef<{id: string, label: string}[]>([]);
   const [waveTitle, setWaveTitle] = useState(false);
@@ -270,13 +302,17 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasSaveData, setHasSaveData] = useState(false);
 
-  // Touch Movement Refs
+  // Touch & Mouse Movement Refs
   const touchStartPos = useRef({ x: 0, y: 0 });
+  const mouseAnchorPos = useRef<{ x: number, y: number } | null>(null);
+  const currentMousePos = useRef({ x: 0, y: 0 });
   const playerStartPos = useRef({ x: 0, y: 0 });
   const isTouching = useRef(false);
+  const isMouseDown = useRef(false);
   const touchPoints = useRef<Record<number, { x: number, y: number }>>({});
   const lastTapTime = useRef(0);
-  const [touchFeedback, setTouchFeedback] = useState<{ x: number, y: number } | null>(null);
+  const slingshotAttackUntil = useRef(0);
+  const slingshotBonusPower = useRef(0); // Power accumulated by grazing while dragging
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -478,7 +514,9 @@ export default function App() {
   };
 
   const createExplosion = (x: number, y: number, color: string, count: number) => {
-    for (let i = 0; i < count; i++) {
+    if (particles.current.length > MAX_PARTICLES) return;
+    const finalCount = isMobile ? Math.ceil(count * 0.2) : count;
+    for (let i = 0; i < finalCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = Math.random() * 10;
       particles.current.push({
@@ -509,7 +547,7 @@ export default function App() {
     if (wingmanRef.current) {
       setHasWingman(false);
       wingmanRef.current = false;
-      createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
+      createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', isMobile ? 10 : 30);
     }
     
     isHackedRef.current = false; // Clear hacked state on hit
@@ -528,24 +566,33 @@ export default function App() {
     createExplosion(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2, '#00ffcc', 50);
   };
 
-  const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => ({
-    x: path ? path[0].x : x, 
-    y: path ? path[0].y : y, 
-    width: 35, height: 35, alive: true, type,
-    isDiving: false, isReturning: false, diveX: 0, diveY: 0,
-    originX: x, originY: y, diveType: 'normal', turnY: 0,
-    diveTime: 0, diveStartX: 0, diveStartY: 0,
-    state: path ? 'ENTERING' : 'IN_FORMATION',
-    path: path,
-    pathIndex: 0,
-    entryDelay: delay,
-    tractorBeamTimer: 0,
-    isTractorBeaming: false,
-    tractorBeamX: 0,
-    stunnedUntil: 0,
-    speedScale: type === 0 ? 1.5 : type === 1 ? 1.2 : type === 2 ? 0.7 : 1.0,
-    amplitudeScale: type === 0 ? 0.8 : type === 1 ? 1.5 : type === 2 ? 0.5 : 1.2
-  });
+  const createEnemy = (x: number, y: number, type: number, delay: number = 0, path?: {x: number, y: number}[]): Enemy => {
+    // Add a random jitter to initial positions to prevent perfect overlap
+    // Increased jitter to be more effective
+    const jitterX = (Math.random() - 0.5) * 30; // Increased jitter
+    const jitterY = (Math.random() - 0.5) * 30; // Increased jitter
+    
+    return {
+      x: (path ? path[0].x : x) + jitterX, 
+      y: (path ? path[0].y : y) + jitterY, 
+      width: 35, height: 35, alive: true, type,
+      isDiving: false, isReturning: false, diveX: 0, diveY: 0,
+      originX: x + jitterX, originY: y + jitterY, diveType: 'normal', turnY: 0,
+      diveTime: 0, diveStartX: 0, diveStartY: 0,
+      state: path ? 'ENTERING' : 'IN_FORMATION',
+      path: path,
+      pathIndex: 0,
+      entryDelay: delay,
+      tractorBeamTimer: 0,
+      isTractorBeaming: false,
+      tractorBeamX: 0,
+      stunnedUntil: 0,
+      speedScale: type === 0 ? 1.5 : type === 1 ? 1.2 : type === 2 ? 0.7 : type === 4 ? 0.9 : 1.0,
+      amplitudeScale: type === 0 ? 0.8 : type === 1 ? 1.5 : type === 2 ? 0.5 : type === 4 ? 0.7 : 1.2,
+      shield: type === 4 ? 20 : 0,
+      maxShield: type === 4 ? 20 : 0
+    };
+  };
 
   // Initialize enemies
   const initEnemies = (waveNum: number) => {
@@ -587,6 +634,8 @@ export default function App() {
       // Normal Waves strictly following the 5-stage design
       if (stage === 1) {
         // Level 1: Popcorn wave! Many weak enemies for immediate satisfaction
+        // Clear existing enemies before initializing new ones to prevent duplicates
+        enemies.current = [];
         const count = waveNum === 1 ? 12 : 18;
         for (let i = 0; i < count; i++) {
           const row = Math.floor(i / 6);
@@ -599,9 +648,9 @@ export default function App() {
           newEnemies.push(createEnemy(80 + (i % 5) * 100, 60 + Math.floor(i / 5) * 70, 0));
         }
       } else if (stage === 3) {
-        // Level 3: Snipers + Turrets
+        // Level 3: Snipers + Turrets + Shielded
         for (let i = 0; i < 8; i++) {
-          newEnemies.push(createEnemy(60 + (i % 4) * 140, 60 + Math.floor(i / 4) * 70, 1));
+          newEnemies.push(createEnemy(60 + (i % 4) * 140, 60 + Math.floor(i / 4) * 70, i % 2 === 0 ? 1 : 4));
         }
         for (let i = 0; i < 2; i++) {
           const turret = createEnemy(150 + i * 200, 220, 1);
@@ -611,14 +660,38 @@ export default function App() {
         }
       } else if (stage === 4) {
         // Level 4: Fast scouts from sides and bottom (Chase)
-        // Fewer enemies because of maze
-        for (let i = 0; i < 8; i++) {
-          const enemy = createEnemy(Math.random() * CANVAS_WIDTH, -50, 2);
-          enemy.state = 'DIVING';
-          enemy.isDiving = true;
-          enemy.diveX = (Math.random() - 0.5) * 4;
-          enemy.diveY = 6;
-          newEnemies.push(enemy);
+        if (waveNum === 4) {
+          // Tentacle Boss (Mid-Boss)
+          const boss = createEnemy(CANVAS_WIDTH / 2 - 50, 100, 3);
+          boss.width = 100; boss.height = 100;
+          boss.health = 1500 + waveRef.current * 100;
+          boss.maxHealth = boss.health;
+          boss.isBoss = true;
+          boss.bossType = BossType.TENTACLE;
+          boss.state = 'BOSS';
+          boss.phase = 1;
+          boss.tentacles = [
+            { segments: [], baseAngle: 0, targetAngle: 0, length: 280 },
+            { segments: [], baseAngle: Math.PI / 3, targetAngle: 0, length: 280 },
+            { segments: [], baseAngle: Math.PI * 2 / 3, targetAngle: 0, length: 280 },
+            { segments: [], baseAngle: Math.PI, targetAngle: 0, length: 280 },
+            { segments: [], baseAngle: Math.PI * 4 / 3, targetAngle: 0, length: 280 },
+            { segments: [], baseAngle: Math.PI * 5 / 3, targetAngle: 0, length: 280 }
+          ];
+          boss.tentacles.forEach(t => {
+            for(let i=0; i<16; i++) t.segments.push({x:0, y:0, angle:0});
+          });
+          newEnemies.push(boss);
+          setBossHealth({ current: boss.health, max: boss.health });
+        } else {
+          for (let i = 0; i < 8; i++) {
+            const enemy = createEnemy(Math.random() * CANVAS_WIDTH, -50, i % 2 === 0 ? 2 : 4);
+            enemy.state = 'DIVING';
+            enemy.isDiving = true;
+            enemy.diveX = (Math.random() - 0.5) * 4;
+            enemy.diveY = 6;
+            newEnemies.push(enemy);
+          }
         }
       } else if (stage === 5) {
         // Level 5: Mixed Elite
@@ -932,6 +1005,7 @@ export default function App() {
     followerHistory.current = [];
     invulnerableUntil.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
+    targetPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     bullets.current = [];
     enemyBullets.current = [];
     particles.current = [];
@@ -990,7 +1064,6 @@ export default function App() {
       if (rect) {
         const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-        setTouchFeedback({ x, y });
       }
 
       touchStartPos.current = { x: touch.clientX, y: touch.clientY };
@@ -1004,33 +1077,246 @@ export default function App() {
       e.preventDefault();
       
       const touch = e.touches[0];
-      const dx = (touch.clientX - touchStartPos.current.x) * 1.2;
-      const dy = (touch.clientY - touchStartPos.current.y) * 1.2;
-
-      targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + dx));
-      targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + dy));
-      
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
         const x = ((touch.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((touch.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-        setTouchFeedback({ x, y });
+        
+        // Track input velocity with smoothing
+        const now = Date.now();
+        inputHistory.current.push({ x, y, t: now });
+        if (inputHistory.current.length > 5) inputHistory.current.shift();
+        
+        if (inputHistory.current.length >= 2) {
+          const first = inputHistory.current[0];
+          const last = inputHistory.current[inputHistory.current.length - 1];
+          const dt = (last.t - first.t) / 1000;
+          if (dt > 0) {
+            inputVel.current.x = (last.x - first.x) / dt;
+            inputVel.current.y = (last.y - first.y) / dt;
+          }
+        }
+        
+        lastInputPos.current = { x, y };
+        lastInputTime.current = now;
+        currentMousePos.current = { x, y };
+
+        // Tension Logic: Dampen movement when pulling away from anchor
+        const rawDx = (x - touchStartPos.current.x) * 1.5;
+        const rawDy = (y - touchStartPos.current.y) * 1.5;
+        
+        // If pulling "down" (slingshot charge), dampen horizontal movement to prevent "sliding"
+        const isPullingDown = rawDy > 20;
+        const hDamp = isPullingDown ? 0.4 : 1.0;
+        
+        // Apply "Rubber Band" resistance: The further you pull, the less the ship moves
+        const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+        const resistance = dist > 50 ? 0.5 : 1.0; 
+
+        targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx * hDamp * resistance));
+        targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + rawDy * resistance));
       }
     };
 
+    const handleSlingshot = () => {
+      const centerX = playerPos.current.x + PLAYER_WIDTH / 2;
+      const centerY = playerPos.current.y + PLAYER_HEIGHT / 2;
+      
+      const homeX = playerStartPos.current.x + PLAYER_WIDTH / 2;
+      const homeY = playerStartPos.current.y + PLAYER_HEIGHT / 2;
+      
+      // Physical direction for the snap
+      const dx = homeX - centerX; 
+      const dy = homeY - centerY;
+      const physicalDist = Math.sqrt(dx * dx + dy * dy);
+
+      // Virtual Tension
+      const inputDx = (mouseAnchorPos.current?.x || touchStartPos.current.x) - currentMousePos.current.x;
+      const inputDy = (mouseAnchorPos.current?.y || touchStartPos.current.y) - currentMousePos.current.y;
+      const inputDist = Math.sqrt(inputDx * inputDx + inputDy * inputDy) * 1.5; 
+
+      const dist = Math.max(physicalDist, inputDist);
+
+      // Reset targetPos to home immediately
+      targetPos.current = { x: playerStartPos.current.x, y: playerStartPos.current.y };
+
+      // Flick Detection
+      const inputSpeed = Math.sqrt(inputVel.current.x ** 2 + inputVel.current.y ** 2);
+      const isFlick = inputSpeed > 400; 
+
+      // 1. DEADZONE / ADJUSTMENT MODE (Small pull)
+      if (dist < 70) {
+        if (isFlick && dist > 5) {
+          const flickPower = Math.min(inputSpeed / 1000, 2.0);
+          const speed = 20 + flickPower * 35; 
+          playerVel.current.x = (inputVel.current.x / inputSpeed) * speed;
+          playerVel.current.y = (inputVel.current.y / inputSpeed) * speed;
+          
+          createExplosion(centerX, centerY, '#00ffcc', isMobile ? 3 : 6); 
+          shake.current = Math.max(shake.current, 2);
+          audio.playSlingshot?.();
+          isSnapping.current = 15; // Start snap phase
+        } else if (dist > 15) {
+          const speed = 15 + (dist / 70) * 20; 
+          const dirX = physicalDist > 5 ? dx / physicalDist : inputDx / (inputDist || 1);
+          const dirY = physicalDist > 5 ? dy / physicalDist : inputDy / (inputDist || 1);
+          playerVel.current.x = dirX * speed;
+          playerVel.current.y = dirY * speed;
+          audio.playSlingshot?.();
+          isSnapping.current = 10;
+        }
+      } 
+      // 2. ATTACK MODE (Large pull)
+      else if (dist >= 70) {
+        const attackDist = dist - 70;
+        const tensionRatio = Math.min(attackDist / 150, 1.5);
+        const totalPower = Math.pow(tensionRatio, 2.0) + slingshotBonusPower.current; 
+        
+        const baseSnapSpeed = 35;
+        const speed = baseSnapSpeed + (totalPower * 55);
+        
+        const dirX = physicalDist > 5 ? dx / physicalDist : inputDx / (inputDist || 1);
+        const dirY = physicalDist > 5 ? dy / physicalDist : inputDy / (inputDist || 1);
+        
+        // Combine with flick if in similar direction
+        let finalVelX = dirX * speed;
+        let finalVelY = dirY * speed;
+        
+        if (isFlick) {
+          const dot = (dirX * inputVel.current.x + dirY * inputVel.current.y) / inputSpeed;
+          if (dot > 0.5) { // Flicking in the same direction as snap
+            finalVelX += (inputVel.current.x / inputSpeed) * (speed * 0.3);
+            finalVelY += (inputVel.current.y / inputSpeed) * (speed * 0.3);
+          }
+        }
+
+        playerVel.current.x = finalVelX;
+        playerVel.current.y = finalVelY;
+
+        const attackDuration = 500 + (totalPower * 700); 
+        slingshotAttackUntil.current = Date.now() + attackDuration; 
+        invulnerableUntil.current = Date.now() + (attackDuration * 0.7);
+        
+        shake.current = Math.max(shake.current, 6 + totalPower * 15); 
+        flash.current = totalPower > 0.8 ? 0.15 : 0; 
+        
+        audio.playSlingshot?.();
+        if (totalPower > 0.5) audio.playOverdrive?.();
+        
+        isSnapping.current = 20; // Longer snap phase for big attacks
+
+        const shockwaveRadius = 120 + (totalPower * 140);
+        enemyBullets.current.forEach(b => {
+          const bdx = b.x - centerX;
+          const bdy = b.y - centerY;
+          if (Math.sqrt(bdx*bdx + bdy*bdy) < shockwaveRadius) {
+            b.y = -100;
+            if (!isMobile) createExplosion(b.x, b.y, '#ffffff', 3);
+          }
+        });
+
+        const trailCount = Math.floor(isMobile ? 2 : 5 + totalPower * 7);
+        for (let i = 0; i < trailCount; i++) {
+          setTimeout(() => {
+            createExplosion(playerPos.current.x + PLAYER_WIDTH/2, playerPos.current.y + PLAYER_HEIGHT/2, '#00ffcc', isMobile ? 4 : 15);
+          }, i * 20);
+        }
+
+        slingshotBonusPower.current = 0;
+      }
+      
+      inputVel.current = { x: 0, y: 0 };
+      inputHistory.current = [];
+    };
+
     const handleTouchEnd = (e: TouchEvent) => {
+      if (isTouching.current) handleSlingshot();
       for (let i = 0; i < e.changedTouches.length; i++) {
         delete touchPoints.current[e.changedTouches[i].identifier];
       }
       if (e.touches.length === 0) {
         isTouching.current = false;
         keysPressed.current['TouchFire'] = false;
-        setTouchFeedback(null);
       }
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (gameState !== 'PLAYING' || showUpgrade) return;
+      
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        // Check if click is actually inside the canvas
+        if (e.clientX < rect.left || e.clientX > rect.right || 
+            e.clientY < rect.top || e.clientY > rect.bottom) {
+          return;
+        }
+
+        isMouseDown.current = true;
+        const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+        const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+        mouseAnchorPos.current = { x, y };
+        currentMousePos.current = { x, y };
+        playerStartPos.current = { x: targetPos.current.x, y: targetPos.current.y };
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (gameState !== 'PLAYING' || showUpgrade) return;
+      
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+        const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+        
+        // Track input velocity with smoothing
+        const now = Date.now();
+        inputHistory.current.push({ x, y, t: now });
+        if (inputHistory.current.length > 5) inputHistory.current.shift();
+        
+        if (inputHistory.current.length >= 2) {
+          const first = inputHistory.current[0];
+          const last = inputHistory.current[inputHistory.current.length - 1];
+          const dt = (last.t - first.t) / 1000;
+          if (dt > 0) {
+            inputVel.current.x = (last.x - first.x) / dt;
+            inputVel.current.y = (last.y - first.y) / dt;
+          }
+        }
+        
+        lastInputPos.current = { x, y };
+        lastInputTime.current = now;
+        currentMousePos.current = { x, y };
+
+        if (isMouseDown.current && mouseAnchorPos.current) {
+          // Tension Logic: Dampen movement when pulling away from anchor
+          const rawDx = (x - mouseAnchorPos.current.x) * 1.5;
+          const rawDy = (y - mouseAnchorPos.current.y) * 1.5;
+          
+          // If pulling "down" (slingshot charge), dampen horizontal movement to prevent "sliding"
+          const isPullingDown = rawDy > 20;
+          const hDamp = isPullingDown ? 0.4 : 1.0;
+          
+          // Apply "Rubber Band" resistance: The further you pull, the less the ship moves
+          const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+          const resistance = dist > 50 ? 0.5 : 1.0; 
+
+          targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx * hDamp * resistance));
+          targetPos.current.y = Math.max(CANVAS_HEIGHT * 0.2, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT - 20, playerStartPos.current.y + rawDy * resistance));
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isMouseDown.current) handleSlingshot();
+      isMouseDown.current = false;
+      mouseAnchorPos.current = null;
     };
 
     window.addEventListener('keydown', handleKeyDown, { passive: false });
     window.addEventListener('keyup', handleKeyUp, { passive: false });
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
     
     const canvas = canvasRef.current;
     if (canvas) {
@@ -1042,6 +1328,9 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
       if (canvas) {
         canvas.removeEventListener('touchstart', handleTouchStart);
         window.removeEventListener('touchmove', handleTouchMove);
@@ -1056,6 +1345,19 @@ export default function App() {
       grazeCount.current++;
       setScore(s => s + 10);
       
+      // If grazing WHILE dragging a slingshot, absorb kinetic energy!
+      const isDragging = isMouseDown.current || isTouching.current;
+      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
+      if (isDragging && anchor) {
+        const dx = currentMousePos.current.x - anchor.x;
+        const dy = currentMousePos.current.y - anchor.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 70) {
+          slingshotBonusPower.current = Math.min(2.0, slingshotBonusPower.current + 0.1);
+          createExplosion(x, y, '#00ffcc', 3); // Visual feedback for absorption
+        }
+      }
+
       // Boost overdrive
       if (!isOverdriveActiveRef.current) {
         overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
@@ -1122,9 +1424,18 @@ export default function App() {
     if (flash.current > 0) flash.current -= 0.04 * dt;
     if (flash.current < 0) flash.current = 0;
 
+    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+
+    // Update trippy intensity
+    const isBossActive = enemies.current.some(e => e.isBoss && e.alive);
+    pulseRef.current = audio.getPulse();
+    const targetTrippy = (isBossActive ? 0.6 : 0) + (currentStage >= 4 ? 0.3 : 0);
+    trippyIntensity.current += (targetTrippy - trippyIntensity.current) * 0.05 * dt;
+    // Add beat pulse to trippy intensity
+    const effectiveTrippy = trippyIntensity.current + pulseRef.current * 0.15 * trippyIntensity.current;
+
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
-    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
     const isAsteroidBelt = currentStage === 2;
     const isFinalFront = currentStage === 5;
 
@@ -1140,11 +1451,12 @@ export default function App() {
 
     // Spawn Asteroids
     if ((isAsteroidBelt || isFinalFront) && !isWarping.current) {
-      const spawnRate = isAsteroidBelt ? 0.02 : 0.02;
+      const spawnRate = isAsteroidBelt ? (isMobile ? 0.008 : 0.02) : (isMobile ? 0.008 : 0.02);
       if (Math.random() < spawnRate) {
         const size = 30 + Math.random() * 60;
+        const vertexCount = isMobile ? 5 : 8;
         const vertices = [];
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < vertexCount; i++) {
           vertices.push(0.8 + Math.random() * 0.4);
         }
         asteroids.current.push({
@@ -1249,14 +1561,80 @@ export default function App() {
       targetPos.current.y += (Math.random() - 0.5) * 15 * dt;
     }
 
-    // Lerp player position
-    const prevX = playerPos.current.x;
-    playerPos.current.x += (targetPos.current.x - playerPos.current.x) * FOLLOW_SMOOTHNESS * dt;
-    playerPos.current.y += (targetPos.current.y - playerPos.current.y) * FOLLOW_SMOOTHNESS * dt;
+    // --- Player Movement Logic (Distance-based speed with inertia) ---
+    const centerX = playerPos.current.x + PLAYER_WIDTH / 2;
+    const centerY = playerPos.current.y + PLAYER_HEIGHT / 2;
+    const targetX = targetPos.current.x + PLAYER_WIDTH / 2;
+    const targetY = targetPos.current.y + PLAYER_HEIGHT / 2;
 
-    // Calculate Tilt (Dynamic)
-    const vx = playerPos.current.x - prevX;
-    playerTilt.current += (vx * 0.2 - playerTilt.current) * 0.1 * dt;
+    const dx = targetX - centerX;
+    const dy = targetY - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Distance-based speed scaling with "Rubber Band" Physics
+    const deadzone = 1.0;
+    const isDragging = isMouseDown.current || isTouching.current;
+
+    if (distance > deadzone) {
+      // Calculate "Tension" - non-linear power (Hooke's Law variation)
+      const tension = Math.min(distance / 200, 1.5);
+      const springForce = Math.pow(tension, 1.0) * 8.0; // Increased force for snappier follow
+
+      const baseSpeed = PLAYER_SPEED * speedRef.current * (isOverdriveActiveRef.current ? 1.4 : 1.0);
+      
+      // Target velocity with spring-like snap
+      const targetVelX = (dx / distance) * baseSpeed * springForce;
+      const targetVelY = (dy / distance) * baseSpeed * springForce;
+
+      // Organic Acceleration: Much tighter when dragging to reduce "lag"
+      const mass = isDragging ? 0.05 : 0.02; 
+      const accel = (mass + tension * 0.1) * dt;
+      
+      // Apply damping: Significantly reduced during "Snap" phase to maintain momentum
+      const baseDamping = isDragging ? 0.80 : 0.92;
+      const damping = isSnapping.current > 0 ? 0.98 : baseDamping;
+      
+      playerVel.current.x *= Math.pow(damping, dt);
+      playerVel.current.y *= Math.pow(damping, dt);
+
+      playerVel.current.x += (targetVelX - playerVel.current.x) * accel;
+      playerVel.current.y += (targetVelY - playerVel.current.y) * accel;
+
+      if (isSnapping.current > 0) isSnapping.current--;
+
+      // Visual feedback for high tension
+      if (distance > 100 && isDragging) {
+        shake.current = Math.max(shake.current, 0.8);
+        if (Date.now() % 25 === 0) {
+          createExplosion(centerX, centerY, '#ffffff', 1); 
+        }
+      }
+    } else {
+      // High-damping friction when close to center for that 'settling' feel
+      const momentum = Math.pow(0.88, dt); 
+      playerVel.current.x *= momentum;
+      playerVel.current.y *= momentum;
+      
+      if (Math.abs(playerVel.current.x) < 0.1) playerVel.current.x = 0;
+      if (Math.abs(playerVel.current.y) < 0.1) playerVel.current.y = 0;
+    }
+
+    // Apply velocity to position
+    playerPos.current.x += playerVel.current.x * dt;
+    playerPos.current.y += playerVel.current.y * dt;
+
+    // Constrain to screen
+    playerPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerPos.current.x));
+    playerPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerPos.current.y));
+
+    // Update tilt based on horizontal velocity or snap direction
+    const pullX = isMouseDown.current || isTouching.current ? (currentMousePos.current.x - (mouseAnchorPos.current?.x || touchStartPos.current.x)) : 0;
+    let targetTilt = (playerVel.current.x * 0.05) + (pullX * 0.001);
+    if (isSnapping.current > 0) {
+      // During snap, point nose towards velocity vector
+      targetTilt = Math.atan2(playerVel.current.x, -playerVel.current.y) * 0.5;
+    }
+    playerTilt.current += (targetTilt - playerTilt.current) * 0.15 * dt;
 
     // Overdrive Ramming Logic
     if (isOverdriveActiveRef.current) {
@@ -1312,7 +1690,7 @@ export default function App() {
     const isMoving = Math.abs(targetPos.current.x - playerPos.current.x) > 0.1 || Math.abs(targetPos.current.y - playerPos.current.y) > 0.1;
 
     // Add trail
-    if (isMoving && Date.now() % 3 === 0) {
+    if (isMoving && Date.now() % 3 === 0 && trails.current.length < MAX_TRAILS) {
       trails.current.push({
         x: playerPos.current.x + PLAYER_WIDTH / 2,
         y: playerPos.current.y + PLAYER_HEIGHT / 2,
@@ -1324,27 +1702,41 @@ export default function App() {
     }
 
     // Update trails
-    trails.current.forEach(t => t.life -= 1 * dt);
-    trails.current = trails.current.filter(t => t.life > 0);
+    const trailList = trails.current;
+    for (let i = trailList.length - 1; i >= 0; i--) {
+      trailList[i].life -= 1 * dt;
+      if (trailList[i].life <= 0) {
+        trailList.splice(i, 1);
+      }
+    }
 
     // Update Power-ups
-    powerUps.current.forEach(p => {
+    const powerUpList = powerUps.current;
+    for (let i = powerUpList.length - 1; i >= 0; i--) {
+      const p = powerUpList[i];
       p.y += 1.5 * dt;
+      
       // Collision with player
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - p.x;
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - p.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
+      
       if (dist < 30) {
         activeEffects.current[p.type] = Date.now() + 8000; // 8 seconds
         p.life = 0;
         audio.playPowerUp?.(); // Optional sound
         setScore(s => s + 500);
       }
-    });
-    powerUps.current = powerUps.current.filter(p => p.y < CANVAS_HEIGHT && p.life > 0);
+      
+      if (p.y >= CANVAS_HEIGHT || p.life <= 0) {
+        powerUpList.splice(i, 1);
+      }
+    }
 
     // Update Scraps
-    scraps.current.forEach(s => {
+    const sList = scraps.current;
+    for (let i = sList.length - 1; i >= 0; i--) {
+      const s = sList[i];
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - s.x;
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - s.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1367,8 +1759,11 @@ export default function App() {
         handleScrapCollection(s);
         s.life = 0;
       }
-    });
-    scraps.current = scraps.current.filter(s => s.y < CANVAS_HEIGHT && s.life > 0);
+      
+      if (s.y >= CANVAS_HEIGHT || s.life <= 0) {
+        sList.splice(i, 1);
+      }
+    }
 
     // Update Damage Numbers
     damageNumbers.current.forEach(dn => dn.life -= 1);
@@ -1715,12 +2110,6 @@ export default function App() {
           glitch.current = 0.3;
         }
       }
-    } else {
-      if (keysPressed.current['KeyX'] || keysPressed.current['TouchOverdrive']) {
-        if (overdriveGauge.current >= MAX_OVERDRIVE) {
-          activateOverdrive();
-        }
-      }
     }
 
     // Update shake & flash
@@ -1768,45 +2157,51 @@ export default function App() {
     }
 
     // Update bullets
-    bullets.current = bullets.current
-      .map((b) => ({ 
-        ...b, 
-        x: b.x + (b.vx || 0) * timeScale.current * dt,
-        y: b.y + (b.vy || -BULLET_SPEED) * timeScale.current * dt
-      }))
-      .filter((b) => b.y > -20 && b.y < CANVAS_HEIGHT + 20);
+    const bulletList = bullets.current;
+    for (let i = bulletList.length - 1; i >= 0; i--) {
+      const b = bulletList[i];
+      b.x += (b.vx || 0) * timeScale.current * dt;
+      b.y += (b.vy || -BULLET_SPEED) * timeScale.current * dt;
+      
+      if (b.y < -20 || b.y > CANVAS_HEIGHT + 20) {
+        bulletList.splice(i, 1);
+      }
+    }
 
     // Update enemy bullets
     const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * timeScale.current;
-    enemyBullets.current = enemyBullets.current
-      .map((b) => {
-        let vx = b.vx || 0;
-        let vy = b.vy || currentEnemyBulletSpeed;
+    const enemyBulletList = enemyBullets.current;
+    for (let i = enemyBulletList.length - 1; i >= 0; i--) {
+      const b = enemyBulletList[i];
+      let vx = b.vx || 0;
+      let vy = b.vy || currentEnemyBulletSpeed;
 
-        if (b.isHoming) {
-          const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - b.x;
-          const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - b.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+      if (b.isHoming) {
+        const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - b.x;
+        const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
           vx += (dx / dist) * 0.1 * dt;
           vy += (dy / dist) * 0.1 * dt;
-          
-          // Cap speed
-          const speed = Math.sqrt(vx * vx + vy * vy);
-          if (speed > 4) {
-            vx = (vx / speed) * 4;
-            vy = (vy / speed) * 4;
-          }
         }
+        
+        // Cap speed
+        const speed = Math.sqrt(vx * vx + vy * vy);
+        if (speed > 4) {
+          vx = (vx / speed) * 4;
+          vy = (vy / speed) * 4;
+        }
+      }
 
-        return {
-          ...b,
-          vx,
-          vy,
-          x: b.x + vx * timeScale.current * dt,
-          y: b.y + vy * dt
-        };
-      })
-      .filter((b) => b.y < CANVAS_HEIGHT + 20 && b.x > -20 && b.x < CANVAS_WIDTH + 20);
+      b.vx = vx;
+      b.vy = vy;
+      b.x += vx * timeScale.current * dt;
+      b.y += vy * dt;
+
+      if (b.y > CANVAS_HEIGHT + 20 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
+        enemyBulletList.splice(i, 1);
+      }
+    }
 
     // Enemy random shooting
     const shootChance = Math.min(0.02 + waveRef.current * 0.005, 0.1);
@@ -1862,6 +2257,19 @@ export default function App() {
                 vx: Math.cos(angle) * currentEnemyBulletSpeed,
                 vy: Math.sin(angle) * currentEnemyBulletSpeed
               });
+            }
+          } else if (type === 4) { // Shielded: Rapid 3-shot burst
+            for (let i = 0; i < 3; i++) {
+              setTimeout(() => {
+                if (!shooter.alive) return;
+                enemyBullets.current.push({
+                  x: shooter.x + shooter.width / 2 - 2,
+                  y: shooter.y + shooter.height,
+                  vx: (dx / distance) * currentEnemyBulletSpeed * 1.5,
+                  vy: (dy / distance) * currentEnemyBulletSpeed * 1.5
+                });
+                audio.playEnemyShoot(shooter.x + shooter.width / 2);
+              }, i * 100);
             }
           }
           return bullets;
@@ -1969,19 +2377,73 @@ export default function App() {
             if (currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1000 : 2000)) {
               enemy.lastShotTime = currentTime;
               for (let i = 0; i < 3; i++) {
-                const offsetX = (Math.random() - 0.5) * 40;
-                const offsetY = (Math.random() - 0.5) * 20;
+                const offsetX = (Math.random() - 0.5) * 60;
+                const offsetY = (Math.random() - 0.5) * 40;
                 const swarmEnemy: Enemy = {
                   ...createEnemy(enemy.x + enemy.width / 2 + offsetX, enemy.y + enemy.height + offsetY, 0),
                   isDiving: true,
                   diveType: 'chase',
-                  diveX: playerPos.current.x + (Math.random() - 0.5) * 100,
-                  diveY: playerPos.current.y + (Math.random() - 0.5) * 100,
+                  // Add significant jitter to target position to prevent overlap during chase
+                  diveX: playerPos.current.x + (Math.random() - 0.5) * 200,
+                  diveY: playerPos.current.y + (Math.random() - 0.5) * 200,
                   state: 'DIVING'
                 };
                 enemies.current.push(swarmEnemy);
               }
               audio.playDive(enemy.x);
+            }
+          } else if (enemy.bossType === BossType.TENTACLE) {
+            // Tentacle Boss logic
+            const time = currentTime / 1000;
+            enemy.x = CANVAS_WIDTH / 2 - enemy.width / 2 + Math.sin(time * 0.5) * 120;
+            enemy.y = 100 + Math.cos(time * 0.3) * 40;
+            
+            if (enemy.tentacles) {
+              enemy.tentacles.forEach((tentacle, tIdx) => {
+                // Base rotation of the whole core
+                const coreRotation = time * 0.4;
+                tentacle.targetAngle = tentacle.baseAngle + coreRotation + Math.sin(time * 0.8 + tIdx) * 1.2;
+                
+                let prevX = enemy.x + enemy.width / 2;
+                let prevY = enemy.y + enemy.height / 2;
+                let currentAngle = tentacle.targetAngle;
+                
+                tentacle.segments.forEach((seg, sIdx) => {
+                  const segLen = tentacle.length / tentacle.segments.length;
+                  // Wavy motion for each segment
+                  seg.angle = currentAngle + Math.sin(time * 2.5 + sIdx * 0.6) * 0.25;
+                  seg.x = prevX + Math.cos(seg.angle) * segLen;
+                  seg.y = prevY + Math.sin(seg.angle) * segLen;
+                  
+                  // Collision with player
+                  const pdx = (playerPos.current.x + PLAYER_WIDTH / 2) - seg.x;
+                  const pdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - seg.y;
+                  const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+                  if (pdist < 20 && invulnerableUntil.current < currentTime) {
+                    handlePlayerHit();
+                  }
+                  
+                  prevX = seg.x;
+                  prevY = seg.y;
+                  currentAngle = seg.angle;
+                });
+              });
+            }
+            
+            // Shooting from tentacle tips
+            if (currentTime - (enemy.lastShotTime || 0) > 1800) {
+              enemy.lastShotTime = currentTime;
+              enemy.tentacles?.forEach(t => {
+                const tip = t.segments[t.segments.length - 1];
+                const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - tip.x;
+                const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - tip.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                enemyBullets.current.push({
+                  x: tip.x, y: tip.y,
+                  vx: (dx / dist) * 3.5, vy: (dy / dist) * 3.5
+                });
+              });
+              audio.playEnemyShoot(enemy.x);
             }
           } else if (enemy.bossType === BossType.LASER) {
             // Rotating Laser Beams
@@ -2056,16 +2518,22 @@ export default function App() {
 
       if (!enemy.isDiving && !enemy.isReturning) {
         if (enemy.state === 'IN_FORMATION') {
-          enemy.x = enemy.originX + formationOffset;
-          enemy.y = enemy.originY;
+          // Smoothly interpolate to the formation position instead of snapping
+          const targetX = enemy.originX + formationOffset;
+          const targetY = enemy.originY;
+          // Slower lerp to allow separation force to win
+          enemy.x += (targetX - enemy.x) * 0.05 * dt;
+          enemy.y += (targetY - enemy.y) * 0.05 * dt;
         }
       } else if (enemy.isDiving) {
         enemy.diveTime = (enemy.diveTime || 0) + 1 * dt;
         
         if (enemy.diveTime < 0) {
-          // Waiting to dive, keep formation
-          enemy.x = enemy.originX + formationOffset;
-          enemy.y = enemy.originY;
+          // Waiting to dive, smoothly follow formation instead of snapping
+          const targetX = enemy.originX + formationOffset;
+          const targetY = enemy.originY;
+          enemy.x += (targetX - enemy.x) * 0.1 * dt;
+          enemy.y += (targetY - enemy.y) * 0.1 * dt;
           enemy.diveStartX = enemy.x;
           enemy.diveStartY = enemy.y;
           return;
@@ -2073,27 +2541,48 @@ export default function App() {
 
         if (enemy.diveType === 'loop') {
           const t = enemy.diveTime;
+          const prevT = t - 1 * dt;
+          
           const loopRadius = 70 * enemy.amplitudeScale;
           const loopSpeed = 0.08 * enemy.speedScale;
           const loopDuration = Math.PI * 2 / loopSpeed;
+
+          const getLoopPos = (time: number) => {
+            const cappedAngle = Math.max(0, Math.min(time * loopSpeed, Math.PI * 2));
+            const direction = (enemy.diveX || 1) > 0 ? 1 : -1;
+            const ox = Math.sin(cappedAngle) * loopRadius * direction;
+            const oy = (1 - Math.cos(cappedAngle)) * loopRadius;
+            
+            let cy = enemy.diveStartY || enemy.originY;
+            if (time <= loopDuration) {
+              cy += Math.max(0, time) * currentEnemyDiveSpeed * 0.4 * enemy.speedScale;
+            } else {
+              cy += loopDuration * currentEnemyDiveSpeed * 0.4 * enemy.speedScale + (time - loopDuration) * currentEnemyDiveSpeed * enemy.speedScale;
+            }
+            
+            return {
+              x: (enemy.diveStartX || enemy.originX) + (enemy.diveX || 0) * time + ox,
+              y: cy + oy
+            };
+          };
+
+          const p1 = getLoopPos(prevT);
+          const p2 = getLoopPos(t);
           
-          let currentY = enemy.diveStartY || enemy.originY;
-          if (t <= loopDuration) {
-            currentY += t * currentEnemyDiveSpeed * 0.4 * enemy.speedScale; // Slower descent during loop
-          } else {
-            currentY += loopDuration * currentEnemyDiveSpeed * 0.4 * enemy.speedScale + (t - loopDuration) * currentEnemyDiveSpeed * enemy.speedScale;
-          }
-          
-          const cappedAngle = Math.min(t * loopSpeed, Math.PI * 2);
-          const direction = (enemy.diveX || 1) > 0 ? 1 : -1;
-          const offsetX = Math.sin(cappedAngle) * loopRadius * direction;
-          const offsetY = (1 - Math.cos(cappedAngle)) * loopRadius;
-          
-          enemy.x = (enemy.diveStartX || enemy.originX) + (enemy.diveX || 0) * t + offsetX;
-          enemy.y = currentY + offsetY;
+          // Apply the DELTA (change in position) instead of absolute assignment.
+          // This allows the separation force from the previous frame to persist.
+          enemy.x += (p2.x - p1.x);
+          enemy.y += (p2.y - p1.y);
         } else if (enemy.diveType === 'chase') {
-          enemy.x += (enemy.diveX || 0) * enemy.speedScale * dt;
-          enemy.y += (enemy.diveY || 0) * enemy.speedScale * dt;
+          const dx = (enemy.diveX || 0) - enemy.x;
+          const dy = (enemy.diveY || 0) - enemy.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 5) {
+            enemy.x += (dx / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
+            enemy.y += (dy / dist) * enemy.speedScale * currentEnemyDiveSpeed * 1.5 * dt;
+          } else {
+            enemy.y += currentEnemyDiveSpeed * enemy.speedScale * dt;
+          }
         } else {
           enemy.y += currentEnemyDiveSpeed * enemy.speedScale;
           
@@ -2138,13 +2627,53 @@ export default function App() {
         if (dist < currentEnemyDiveSpeed) {
           enemy.isReturning = false;
           enemy.state = 'IN_FORMATION';
-          enemy.x = targetX;
-          enemy.y = targetY;
+          // No snapping, let the IN_FORMATION lerp handle the final alignment
         } else {
           enemy.x += (dx / dist) * currentEnemyDiveSpeed;
           enemy.y += (dy / dist) * currentEnemyDiveSpeed;
         }
       }
+    });
+
+    // Final Separation Pass (Post-movement)
+    // This ensures enemies don't overlap even if their formulas try to put them in the same spot
+    enemies.current.forEach((enemy) => {
+      if (!enemy.alive || enemy.state === 'ENTERING') return;
+      
+      enemies.current.forEach((other) => {
+        if (enemy === other || !other.alive || other.state === 'ENTERING') return;
+        
+        const dx = enemy.x - other.x;
+        const dy = enemy.y - other.y;
+        let distSq = dx * dx + dy * dy;
+        const minDist = 38; // Slightly larger than enemy width (35)
+        
+        if (distSq < minDist * minDist) {
+          let dist = Math.sqrt(distSq);
+          let moveX, moveY;
+          
+          if (dist < 0.1) {
+            const angle = Math.random() * Math.PI * 2;
+            moveX = Math.cos(angle) * 5; // Explosive push for perfect overlap
+            moveY = Math.sin(angle) * 5;
+          } else {
+            // Very strong force to ensure separation during fast movement
+            const force = (minDist - dist) / minDist * 3.5; 
+            moveX = (dx / dist) * force + (Math.random() - 0.5) * 0.5; // Add jitter
+            moveY = (dy / dist) * force + (Math.random() - 0.5) * 0.5;
+          }
+          
+          // ONLY move the visual position. 
+          // NEVER modify originX/Y here.
+          enemy.x += moveX;
+          enemy.y += moveY;
+          
+          if (enemy.isDiving) {
+            if (enemy.diveStartX != null) enemy.diveStartX += moveX;
+            if (enemy.diveStartY != null) enemy.diveStartY += moveY;
+          }
+        }
+      });
     });
 
     // Formation dive
@@ -2199,16 +2728,21 @@ export default function App() {
         squad.forEach((diver, index) => {
           diver.isDiving = true;
           diver.state = 'DIVING';
-          diver.diveTime = -index * 15; // 15 frames delay for snake-like formation
-          diver.diveStartX = diver.x;
-          diver.diveStartY = diver.y;
+          // Add significant jitter to diveTime to stagger the dive
+          diver.diveTime = -index * 20 + (Math.random() - 0.5) * 25; // Increased stagger
+          diver.diveStartX = diver.x + (Math.random() - 0.5) * 20; // More jitter
+          diver.diveStartY = diver.y + (Math.random() - 0.5) * 20; // Add jitter to Y too
+          
+          diver.speedScale = 0.85 + Math.random() * 0.3; // More speed variance
+          diver.amplitudeScale = 0.7 + Math.random() * 0.6; // More movement variance
           
           if (diveType === 'spread') {
             // Spread out from the center
-            const spreadFactor = (index - (squadSize - 1) / 2) * 1.5;
+            const spreadFactor = (index - (squadSize - 1) / 2) * 2.5;
             diver.diveX = baseDiveX + spreadFactor;
           } else {
-            diver.diveX = baseDiveX; // Fly in parallel formation
+            // Add jitter to diveX even in parallel formation
+            diver.diveX = baseDiveX + (Math.random() - 0.5) * 0.8; 
           }
           
           diver.diveType = diveType;
@@ -2221,10 +2755,15 @@ export default function App() {
     }
 
     // Collision detection
-    bullets.current.forEach((bullet, bIdx) => {
-      enemies.current.forEach((enemy) => {
-        if (enemy.alive &&
-            bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
+    const aliveEnemies = enemies.current.filter(e => e.alive);
+    const playerBullets = bullets.current;
+    
+    for (let i = playerBullets.length - 1; i >= 0; i--) {
+      const bullet = playerBullets[i];
+      
+      for (let j = 0; j < aliveEnemies.length; j++) {
+        const enemy = aliveEnemies[j];
+        if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
           
           let damage = (bullet.damage || 1) * 10;
@@ -2246,7 +2785,7 @@ export default function App() {
 
           // Tesla Arc (Chain Lightning)
           if (chainLightningRef.current > 0) {
-            const nearby = enemies.current.filter(e => e !== enemy && e.alive);
+            const nearby = aliveEnemies.filter(e => e !== enemy);
             nearby.forEach(e => {
               const edx = enemy.x - e.x;
               const edy = enemy.y - e.y;
@@ -2276,7 +2815,7 @@ export default function App() {
           if (enemy.isBoss) {
             enemy.health! -= damage;
             setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
-            bullets.current.splice(bIdx, 1);
+            playerBullets.splice(i, 1);
             audio.playEnemyHit(enemy.x + enemy.width / 2);
             flash.current = 0.2;
             
@@ -2324,23 +2863,7 @@ export default function App() {
               }
 
               // Big explosion
-              for(let i=0; i<100; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                const speed = Math.random() * 12;
-                particles.current.push({
-                  x: enemy.x + enemy.width/2,
-                  y: enemy.y + enemy.height/2,
-                  vx: Math.cos(angle) * speed,
-                  vy: Math.sin(angle) * speed,
-                  life: 40 + Math.random() * 40,
-                  maxLife: 80,
-                  color: i % 2 === 0 ? '#ff3366' : '#ffffff',
-                  size: 4 + Math.random() * 6,
-                  type: 'square',
-                  rotation: Math.random() * Math.PI,
-                  vr: (Math.random() - 0.5) * 0.2
-                });
-              }
+              createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff33cc', 100);
               shake.current = 30;
             }
             return;
@@ -2352,7 +2875,7 @@ export default function App() {
           if (isOverdriveActiveRef.current) {
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 50);
             // Damage nearby enemies
-            enemies.current.forEach(other => {
+            aliveEnemies.forEach(other => {
               if (other.alive && other !== enemy) {
                 const dx = (other.x + other.width/2) - (enemy.x + enemy.width/2);
                 const dy = (other.y + other.height/2) - (enemy.y + enemy.height/2);
@@ -2369,13 +2892,13 @@ export default function App() {
           if (relicsRef.current.some(r => r.id === 'CHRONO') && Math.random() < 0.05) {
             timeScale.current = 0.3;
           }
-          bullets.current.splice(bIdx, 1);
+          playerBullets.splice(i, 1);
           
           // Drop scrap
           const scrapChance = isOverdriveActiveRef.current ? 1.0 : 0.6;
           const scrapCount = isOverdriveActiveRef.current ? 3 : 1;
           if (Math.random() < scrapChance) {
-            for (let i = 0; i < scrapCount; i++) {
+            for (let k = 0; k < scrapCount; k++) {
               scraps.current.push({
                 x: enemy.x + enemy.width / 2,
                 y: enemy.y + enemy.height / 2,
@@ -2423,26 +2946,12 @@ export default function App() {
           
           // Spawn particles
           const colors = ['#ffcc00', '#ff33cc', '#33ccff'];
-          for(let i=0; i<25; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const speed = Math.random() * 8;
-            particles.current.push({
-              x: enemy.x + enemy.width/2,
-              y: enemy.y + enemy.height/2,
-              vx: Math.cos(angle) * speed,
-              vy: Math.sin(angle) * speed,
-              life: 20 + Math.random() * 20,
-              maxLife: 40,
-              color: colors[enemy.type],
-              size: 2 + Math.random() * 4,
-              type: Math.random() > 0.5 ? 'square' : 'line',
-              rotation: Math.random() * Math.PI,
-              vr: (Math.random() - 0.5) * 0.2
-            });
-          }
+          createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, colors[enemy.type] || '#ffcc00', 30);
+          
+          break; // Bullet hit an enemy, move to next bullet
         }
-      });
-    });
+      }
+    }
 
     // Player collision (smaller hitbox for dodging)
     const hitMargin = 15;
@@ -2452,22 +2961,45 @@ export default function App() {
     const ph = PLAYER_HEIGHT - hitMargin * 2;
 
     let playerHit = false;
+    const isSlingshotAttacking = Date.now() < slingshotAttackUntil.current;
 
-    enemies.current.forEach((enemy) => {
-      if (enemy.alive &&
-          enemy.x < px + pw &&
+    for (let i = 0; i < aliveEnemies.length; i++) {
+      const enemy = aliveEnemies[i];
+      if (enemy.x < px + pw &&
           enemy.x + enemy.width > px &&
           enemy.y < py + ph &&
           enemy.y + enemy.height > py) {
-        playerHit = true;
+        
+        if (isSlingshotAttacking || isOverdriveActiveRef.current) {
+          // Offensive collision: Damage enemy
+          const damage = isOverdriveActiveRef.current ? 1000 : 150;
+          enemy.health! -= damage;
+          if (enemy.health! <= 0) {
+            enemy.alive = false;
+            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#00ffcc', 40);
+            audio.playEnemyHit(enemy.x + enemy.width / 2);
+          } else {
+            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ffffff', 15);
+            audio.playEnemyHit(enemy.x + enemy.width / 2);
+          }
+          shake.current = Math.max(shake.current, 8);
+          // Bounce slightly on impact to feel 'physical'
+          playerVel.current.x *= 0.8;
+          playerVel.current.y *= 0.8;
+        } else {
+          playerHit = true;
+        }
       }
-    });
+    }
 
-    enemyBullets.current.forEach((bullet) => {
+    const eBullets = enemyBullets.current;
+    for (let i = eBullets.length - 1; i >= 0; i--) {
+      const bullet = eBullets[i];
       // Graze Detection for bullets
       const bdx = (playerPos.current.x + PLAYER_WIDTH / 2) - bullet.x;
       const bdy = (playerPos.current.y + PLAYER_HEIGHT / 2) - bullet.y;
       const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+      
       if (bdist < GRAZE_DISTANCE && bdist > 15) {
         handleGraze(bullet.x, bullet.y);
       }
@@ -2475,10 +3007,21 @@ export default function App() {
       if (bullet.x > px && bullet.x < px + pw &&
           bullet.y > py && bullet.y < py + ph) {
         playerHit = true;
+        eBullets.splice(i, 1);
       }
-    });
+    }
 
     if (playerHit && Date.now() > invulnerableUntil.current) {
+      // COUNTER HIT: If hit while dragging a high-tension slingshot, it's extra dangerous!
+      const isDragging = isMouseDown.current || isTouching.current;
+      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
+      let isHighTension = false;
+      if (isDragging && anchor) {
+        const dx = currentMousePos.current.x - anchor.x;
+        const dy = currentMousePos.current.y - anchor.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 70) isHighTension = true;
+      }
       // Auto-bomb if overdrive is full
       if (overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current) {
         activateOverdrive();
@@ -2493,6 +3036,15 @@ export default function App() {
         shake.current = 10;
         glitch.current = 15;
         audio.playPlayerHit(); // Or a shield break sound
+        
+        // If it was a counter hit, the shield break is more violent
+        if (isHighTension) {
+          createExplosion(playerPos.current.x + PLAYER_WIDTH/2, playerPos.current.y + PLAYER_HEIGHT/2, '#ff0066', 25);
+          isMouseDown.current = false; // Force release
+          mouseAnchorPos.current = null;
+          isTouching.current = false;
+          slingshotBonusPower.current = 0;
+        }
         return;
       }
 
@@ -2500,9 +3052,20 @@ export default function App() {
       if (isOverdriveActiveRef.current) return;
 
       audio.playPlayerHit();
-      shake.current = 20;
-      glitch.current = 30;
+      shake.current = isHighTension ? 40 : 20;
+      glitch.current = isHighTension ? 50 : 30;
       flash.current = 1;
+      
+      // If it was a counter hit, lose more health or overdrive
+      if (isHighTension) {
+        overdriveGauge.current = Math.max(0, overdriveGauge.current - 20);
+        setOverdrive(overdriveGauge.current);
+        // Force release of the slingshot
+        isMouseDown.current = false;
+        mouseAnchorPos.current = null;
+        isTouching.current = false;
+        slingshotBonusPower.current = 0;
+      }
       
       // Spawn player explosion particles
       for(let i=0; i<50; i++) {
@@ -2523,8 +3086,9 @@ export default function App() {
         });
       }
 
-      if (integrityRef.current > 20) {
-        integrityRef.current -= 20;
+      const damage = isHighTension ? 40 : 20;
+      if (integrityRef.current > damage) {
+        integrityRef.current -= damage;
         setIntegrity(integrityRef.current);
         invulnerableUntil.current = Date.now() + 2000;
         enemyBullets.current = []; // Clear bullets to give a chance to recover
@@ -2553,8 +3117,9 @@ export default function App() {
         isWarp: true
       });
     }
-
-    particles.current.forEach(p => {
+    const particleList = particles.current;
+    for (let i = particleList.length - 1; i >= 0; i--) {
+      const p = particleList[i];
       if (p.isWarp) {
         // Warp particles fly towards center
         const dx = CANVAS_WIDTH / 2 - p.x;
@@ -2574,8 +3139,11 @@ export default function App() {
         p.rotation += p.vr * dt;
       }
       p.life -= 1 * dt;
-    });
-    particles.current = particles.current.filter(p => p.life > 0);
+      
+      if (p.life <= 0) {
+        particleList.splice(i, 1);
+      }
+    }
 
     // Wave Completion Logic
     const isTimeBasedStage = currentStage === 2; // Asteroid Belt is survival based
@@ -2735,8 +3303,8 @@ export default function App() {
     // Decay effects
     // (Moved to beginning of update loop)
  
-    const aliveEnemies = enemies.current.filter(e => e.alive);
-    if (aliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
+    const currentAliveEnemies = enemies.current.filter(e => e.alive);
+    if (currentAliveEnemies.some(e => e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
       setGameState('GAME_OVER');
     }
   };
@@ -2847,14 +3415,18 @@ export default function App() {
     const gridColor = isWarping.current ? `rgba(255, 51, 102, ${0.1 + warpFactor.current * 0.3})` : baseGridColor;
     ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
-    const gridSpacing = 40;
+    const gridSpacing = isMobile ? 80 : 40; // Fewer grid lines on mobile
     const gridSpeed = isWarping.current ? 100 : 20;
     const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
-    for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, CANVAS_HEIGHT);
-      ctx.stroke();
+    
+    // Only draw vertical lines on mobile to save performance
+    if (!isMobile) {
+      for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, CANVAS_HEIGHT);
+        ctx.stroke();
+      }
     }
     for (let y = gridOffset; y <= CANVAS_HEIGHT; y += gridSpacing) {
       ctx.beginPath();
@@ -2941,16 +3513,17 @@ export default function App() {
       ctx.save();
       ctx.translate(a.x, a.y);
       ctx.rotate(a.rotation);
-      ctx.shadowBlur = 10;
+      if (!isMobile) ctx.shadowBlur = 10;
       
       const isLarge = a.size > 35;
-      ctx.shadowColor = isLarge ? '#00ffcc' : '#888';
+      if (!isMobile) ctx.shadowColor = isLarge ? '#00ffcc' : '#888';
       ctx.strokeStyle = isLarge ? '#00ffcc' : '#888';
       ctx.lineWidth = isLarge ? 2.5 : 1.5;
       
       ctx.beginPath();
-      for (let i = 0; i < 8; i++) {
-        const angle = (i / 8) * Math.PI * 2;
+      const vertexCount = a.vertices ? a.vertices.length : 8;
+      for (let i = 0; i < vertexCount; i++) {
+        const angle = (i / vertexCount) * Math.PI * 2;
         const r = a.size * (a.vertices ? a.vertices[i] : 1);
         if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
         else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
@@ -2959,12 +3532,13 @@ export default function App() {
       ctx.stroke();
       
       // Inner wireframe for large asteroids
-      if (isLarge) {
+      if (isLarge && !isMobile) {
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
         ctx.lineWidth = 1;
-        for (let i = 0; i < 8; i+=2) {
-          const angle = (i / 8) * Math.PI * 2;
+        const vertexCount = a.vertices ? a.vertices.length : 8;
+        for (let i = 0; i < vertexCount; i+=2) {
+          const angle = (i / vertexCount) * Math.PI * 2;
           const r = a.size * 0.4;
           ctx.moveTo(0, 0);
           ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
@@ -3172,16 +3746,39 @@ export default function App() {
       
       // Dynamic tilt from Lerp
       ctx.rotate(playerTilt.current);
+      if (!isMobile) ctx.shadowBlur = 25;
 
-      // Ship Scale & Stretching (Warp/Overdrive)
-      const shipScale = 1 + (isOverdriveActiveRef.current ? 0.1 : 0);
-      const stretchY = 1 + warpFactor.current * 1.5;
-      const stretchX = 1 - warpFactor.current * 0.3;
+      // Ship Scale & Stretching (Warp/Overdrive/Beat/Rubber Band)
+      const pullDist = isMouseDown.current || isTouching.current ? Math.sqrt((currentMousePos.current.x - (mouseAnchorPos.current?.x || touchStartPos.current.x))**2 + (currentMousePos.current.y - (mouseAnchorPos.current?.y || touchStartPos.current.y))**2) : 0;
+      const pullRatio = Math.min(pullDist / 100, 1);
+      const shipVib = pullRatio > 0.8 ? (Math.random() - 0.5) * 2 : 0;
+      ctx.translate(shipVib, shipVib);
+
+      const beatPulse = pulseRef.current * 0.15;
+      const shipScale = 1 + (isOverdriveActiveRef.current ? 0.1 : 0) + beatPulse;
+      
+      // Rubber Band Stretch based on velocity
+      const currentSpeed = Math.sqrt(playerVel.current.x ** 2 + playerVel.current.y ** 2);
+      const rubberStretch = Math.min(currentSpeed / 60, 0.4); // Elongation factor
+      
+      const stretchY = 1 + warpFactor.current * 1.5 + rubberStretch;
+      const stretchX = 1 - warpFactor.current * 0.3 - rubberStretch * 0.3;
+      
+      // Tension Visual (Charging Slingshot)
+      const isCharging = isMouseDown.current || isTouching.current;
+      const tensionVib = isCharging && pullDist > 70 ? (Math.random() - 0.5) * (pullDist / 20) : 0;
+      ctx.translate(tensionVib, 0);
+
+      // If moving fast horizontally, tilt more towards velocity
+      const velAngle = Math.atan2(playerVel.current.y, playerVel.current.x);
+      const velTilt = (playerVel.current.x / 40) * 0.2;
+      
       ctx.scale(shipScale * stretchX, shipScale * stretchY);
       
-      // Warp Ghosting
+      // Warp Ghosting - Reduced on mobile
       if (warpFactor.current > 0.2) {
-        for (let i = 1; i <= 3; i++) {
+        const ghostCount = isMobile ? 1 : 3;
+        for (let i = 1; i <= ghostCount; i++) {
           ctx.save();
           ctx.translate(0, i * 20 * warpFactor.current);
           ctx.globalAlpha = 0.3 / i;
@@ -3230,15 +3827,98 @@ export default function App() {
         ctx.restore();
       }
 
-      ctx.shadowBlur = 25;
+      if (!isMobile) ctx.shadowBlur = 25;
       if (!isHackedRef.current) {
-        ctx.shadowColor = '#00ffcc';
+        if (!isMobile) ctx.shadowColor = '#00ffcc';
         ctx.strokeStyle = '#00ffcc';
       }
       ctx.lineWidth = 2.5;
       
       // High-End Neon Vector Ship
       drawShipVector(ctx);
+
+      // Charging Tension Glow - Simplified on mobile
+      if (isCharging && pullDist > 15) {
+        ctx.save();
+        const tensionRatio = Math.min(pullDist / 150, 1.5);
+        const bonusRatio = slingshotBonusPower.current / 2.0;
+        
+        ctx.strokeStyle = `rgba(0, 255, 204, ${0.2 + tensionRatio * 0.4})`;
+        ctx.lineWidth = 1 + tensionRatio * 2;
+        if (!isMobile) {
+          ctx.shadowBlur = 10 + tensionRatio * 20;
+          ctx.shadowColor = '#00ffcc';
+        }
+        
+        // Bonus power sparks
+        if (bonusRatio > 0.1) {
+          ctx.strokeStyle = `rgba(255, 255, 255, ${bonusRatio})`;
+          ctx.lineWidth = 2;
+        }
+
+        ctx.beginPath();
+        ctx.arc(0, 0, 15 + tensionRatio * 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Invulnerability Shield Visual
+      if (isInvulnerable) {
+        ctx.save();
+        const timeLeft = invulnerableUntil.current - Date.now();
+        const isEnding = timeLeft < 500;
+        const pulse = Math.sin(Date.now() / (isEnding ? 30 : 100)) * 5;
+        
+        ctx.strokeStyle = isEnding ? 'rgba(255, 51, 102, 0.6)' : 'rgba(0, 255, 204, 0.6)';
+        ctx.lineWidth = 2 + pulse / 2;
+        if (!isMobile) {
+          ctx.shadowBlur = 15 + pulse;
+          ctx.shadowColor = isEnding ? '#ff3366' : '#00ffcc';
+        }
+        
+        ctx.beginPath();
+        ctx.arc(0, 0, 25 + pulse, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Inner hex pattern or simple glow
+        ctx.globalAlpha = 0.1 + (pulse + 5) / 100;
+        ctx.fillStyle = isEnding ? '#ff3366' : '#00ffcc';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Slingshot Attack Visual Feedback
+      if (Date.now() < slingshotAttackUntil.current) {
+        const isStillInvulnerable = Date.now() < invulnerableUntil.current;
+        ctx.save();
+        const pulse = Math.sin(Date.now() / 50) * 5;
+        
+        // Color changes based on vulnerability
+        ctx.strokeStyle = isStillInvulnerable ? '#00ffcc' : '#ff9900';
+        ctx.shadowColor = isStillInvulnerable ? '#00ffcc' : '#ff9900';
+        ctx.lineWidth = 2;
+        if (!isMobile) ctx.shadowBlur = 20 + pulse;
+        ctx.globalAlpha = 0.3;
+        
+        // Energy Ring (Larger than shield)
+        ctx.beginPath();
+        ctx.arc(0, 0, 35 + pulse, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Speed Trails (Afterimages)
+        for (let i = 1; i <= 2; i++) {
+          ctx.save();
+          // Offset trails based on velocity
+          const trailOffset = i * 15;
+          const angle = Math.atan2(playerVel.current.y, playerVel.current.x) + Math.PI;
+          ctx.translate(Math.cos(angle) * trailOffset, Math.sin(angle) * trailOffset);
+          ctx.globalAlpha = (isStillInvulnerable ? 0.2 : 0.1) / i;
+          ctx.strokeStyle = isStillInvulnerable ? '#00ffcc' : '#ff9900';
+          drawShipVector(ctx);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
       
       // Cockpit Glow
       ctx.fillStyle = '#ffffff';
@@ -3248,15 +3928,20 @@ export default function App() {
       ctx.fill();
       ctx.globalAlpha = 1.0;
       
-      // Engine/Afterburner Glow
-      const engineFlicker = Math.random() * 5;
-      ctx.shadowBlur = 15 + engineFlicker;
-      ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#33ccff';
+      // Engine/Afterburner Glow (Subtle)
+      const thrustScale = 1 + currentSpeed * 0.2; // Reduced scaling
+      const engineFlicker = Math.random() * 2; // Reduced flicker
+      if (!isMobile) {
+        ctx.shadowBlur = 10 + engineFlicker;
+        ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#33ccff';
+      }
       ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#33ccff';
+      ctx.globalAlpha = 0.6; // More transparent
       // Left Engine
-      ctx.fillRect(-12, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActiveRef.current ? 20 : 10) + engineFlicker);
+      ctx.fillRect(-11, PLAYER_HEIGHT/2 - 6, 4, ((isOverdriveActiveRef.current ? 15 : 6) + engineFlicker) * thrustScale);
       // Right Engine
-      ctx.fillRect(6, PLAYER_HEIGHT/2 - 8, 6, (isOverdriveActiveRef.current ? 20 : 10) + engineFlicker);
+      ctx.fillRect(7, PLAYER_HEIGHT/2 - 6, 4, ((isOverdriveActiveRef.current ? 15 : 6) + engineFlicker) * thrustScale);
+      ctx.globalAlpha = 1.0;
 
       // Shield Effect
       if (activeEffects.current['SHIELD'] > Date.now()) {
@@ -3273,19 +3958,8 @@ export default function App() {
 
       // Wingman Rendering
       if (hasWingman) {
-        // Neon wire connection
         ctx.save();
-        ctx.strokeStyle = 'rgba(0, 255, 204, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([2, 4]);
-        ctx.beginPath();
-        ctx.moveTo(playerPos.current.x + PLAYER_WIDTH / 2, playerPos.current.y + PLAYER_HEIGHT / 2);
-        ctx.lineTo(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
-        ctx.stroke();
-        ctx.restore();
-
-        ctx.save();
-      ctx.translate(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
+        ctx.translate(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2);
       ctx.scale(0.8, 0.8); // Slightly smaller
       
       const color = '#ff33cc';
@@ -3311,7 +3985,7 @@ export default function App() {
     }
 
     // Bullets
-    ctx.shadowBlur = 15;
+    if (!isMobile) ctx.shadowBlur = 15;
     bullets.current.forEach((b) => {
       const size = b.size || 4;
       ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
@@ -3321,7 +3995,7 @@ export default function App() {
     
     // Enemy Bullets
     ctx.fillStyle = '#ff9900'; // Changed to Orange for better visibility against player's pink Overdrive
-    ctx.shadowColor = '#ff9900';
+    if (!isMobile) ctx.shadowColor = '#ff9900';
     enemyBullets.current.forEach((b) => {
       ctx.beginPath();
       ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
@@ -3493,6 +4167,84 @@ export default function App() {
         ctx.strokeRect(-8, -8, 16, 16);
         ctx.restore();
         
+        // Draw Tentacles in world space
+        if (enemy.bossType === BossType.TENTACLE && enemy.tentacles) {
+          ctx.restore(); // Restore boss translate
+          const time = Date.now() / 1000;
+          
+          enemy.tentacles.forEach((t, tIdx) => {
+            const hue = (time * 50 + tIdx * 60) % 360;
+            const color = `hsla(${hue}, 80%, 60%, 1)`;
+            const glowColor = `hsla(${hue}, 80%, 60%, 0.4)`;
+
+            t.segments.forEach((seg, i) => {
+              ctx.save();
+              ctx.translate(seg.x, seg.y);
+              ctx.rotate(seg.angle);
+              
+              const size = 30 - i * 2;
+              if (size <= 0) {
+                ctx.restore();
+                return;
+              }
+
+              // Glow
+              ctx.shadowBlur = 15;
+              ctx.shadowColor = glowColor;
+              
+              // Organic segment
+              ctx.fillStyle = i % 2 === 0 ? color : '#ffffff';
+              ctx.beginPath();
+              // Pulsating size
+              const pulse = 1 + Math.sin(time * 5 + i * 0.5) * 0.15;
+              ctx.ellipse(0, 0, (size/2) * pulse, (size/3) * pulse, 0, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Inner detail
+              if (i % 3 === 0) {
+                ctx.fillStyle = '#000000';
+                ctx.beginPath();
+                ctx.arc(0, 0, size/6, 0, Math.PI * 2);
+                ctx.fill();
+              }
+
+              ctx.restore();
+            });
+
+            // Tip effect
+            const tip = t.segments[t.segments.length - 1];
+            ctx.save();
+            ctx.translate(tip.x, tip.y);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 5 + Math.sin(time * 10) * 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          });
+          
+          // Core
+          ctx.save();
+          ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+          const coreHue = (time * 100) % 360;
+          ctx.fillStyle = `hsla(${coreHue}, 90%, 50%, 1)`;
+          ctx.shadowBlur = 30;
+          ctx.shadowColor = `hsla(${coreHue}, 90%, 50%, 0.8)`;
+          ctx.beginPath();
+          ctx.arc(0, 0, 30 + Math.sin(time * 8) * 5, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Core eye
+          ctx.fillStyle = '#000000';
+          ctx.beginPath();
+          ctx.arc(Math.sin(time * 2) * 5, Math.cos(time * 2) * 5, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          return;
+        }
+        
         ctx.restore();
         return;
       }
@@ -3619,6 +4371,32 @@ export default function App() {
           ctx.fillStyle = '#ff0000';
           ctx.fillRect(-barW/2, -enemy.height/2 - 10, (enemy.health / enemy.maxHealth) * barW, barH);
         }
+      } else if (enemy.type === 4) {
+        // Type 4: Shielded (Circle with front arc)
+        const shieldColor = '#33ccff';
+        ctx.strokeStyle = shieldColor;
+        ctx.shadowColor = shieldColor;
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = 2;
+        
+        // Body
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.width / 2 - 5, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Core
+        ctx.fillStyle = shieldColor;
+        ctx.beginPath();
+        ctx.arc(0, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Shield Arc
+        if (enemy.shield && enemy.shield > 0) {
+          ctx.beginPath();
+          ctx.arc(0, 0, enemy.width / 2, -Math.PI / 2, Math.PI / 2);
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
       }
       
       ctx.restore();
@@ -3672,42 +4450,54 @@ export default function App() {
 
     ctx.restore(); // Restore from shake
 
-    // Nebula Pass Effect (Stage 3: Heavy Fire)
-    if (currentStage === 3) {
+    // Nebula Pass Effect (Stage 3+: Heavy Fire / Trippy)
+    if (currentStage >= 3 || trippyIntensity.current > 0.1) {
       ctx.save();
       const time = Date.now() / 2000;
+      const intensity = (currentStage === 3 ? 0.1 : 0) + trippyIntensity.current * 0.3 + (pulseRef.current * 0.15 * trippyIntensity.current);
+      
       const nebulaGradient = ctx.createRadialGradient(
-        CANVAS_WIDTH / 2 + Math.sin(time) * 100,
-        CANVAS_HEIGHT / 2 + Math.cos(time) * 100,
+        CANVAS_WIDTH / 2 + Math.sin(time) * 150,
+        CANVAS_HEIGHT / 2 + Math.cos(time * 0.7) * 150,
         0,
         CANVAS_WIDTH / 2,
         CANVAS_HEIGHT / 2,
-        CANVAS_WIDTH
+        CANVAS_WIDTH * (1.5 + pulseRef.current * 0.2)
       );
-      nebulaGradient.addColorStop(0, 'rgba(100, 0, 255, 0.1)');
-      nebulaGradient.addColorStop(0.5, 'rgba(50, 0, 100, 0.05)');
+      
+      const hue1 = (time * 40 + (trippyIntensity.current * 100)) % 360;
+      const hue2 = (hue1 + 60 + (pulseRef.current * 30)) % 360;
+      
+      nebulaGradient.addColorStop(0, `hsla(${hue1}, 80%, 50%, ${intensity})`);
+      nebulaGradient.addColorStop(0.5, `hsla(${hue2}, 80%, 30%, ${intensity * 0.5})`);
       nebulaGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
       
       ctx.fillStyle = nebulaGradient;
+      ctx.globalCompositeOperation = 'screen';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       
-      // Add some "static" noise
-      ctx.globalAlpha = 0.03;
-      for (let i = 0; i < 5; i++) {
-        const x = Math.random() * CANVAS_WIDTH;
-        const y = Math.random() * CANVAS_HEIGHT;
-        const w = Math.random() * 200 + 100;
-        const h = Math.random() * 50 + 20;
-        ctx.fillStyle = '#ff00ff';
-        ctx.fillRect(x, y, w, h);
+      // Add some "static" noise / particles
+      if (trippyIntensity.current > 0.3) {
+        ctx.globalAlpha = trippyIntensity.current * 0.1;
+        for (let i = 0; i < 10; i++) {
+          const x = Math.random() * CANVAS_WIDTH;
+          const y = Math.random() * CANVAS_HEIGHT;
+          const size = Math.random() * 100 + 50;
+          ctx.fillStyle = i % 2 === 0 ? '#ff00ff' : '#00ffff';
+          ctx.beginPath();
+          ctx.arc(x, y, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.globalAlpha = 1.0;
+      ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
     }
 
     // Flash
-    if (flash.current > 0) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${flash.current * 0.3})`;
+    if (flash.current > 0 || pulseRef.current > 0.1) {
+      const flashAlpha = (flash.current * 0.3) + (pulseRef.current * 0.05 * trippyIntensity.current);
+      ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
 
@@ -3729,15 +4519,73 @@ export default function App() {
     }
     */
 
-    // Touch Feedback
-    if (touchFeedback) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(0, 255, 204, 0.5)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(touchFeedback.x, touchFeedback.y, 30, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
+    // Draw Mouse/Touch Anchor & Tether
+    if (gameState === 'PLAYING') {
+      const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
+      const current = currentMousePos.current;
+
+      if (anchor && (isMouseDown.current || isTouching.current)) {
+        const dx = current.x - anchor.x;
+        const dy = current.y - anchor.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxJoy = 100;
+        const ratio = Math.min(dist / maxJoy, 1);
+
+        ctx.save();
+        
+        // 1. Anchor Ring (The '⚪︎') - Pulses and changes color with tension
+        const isAttackRange = dist >= 70;
+        const tension = Math.min(dist / 180, 1.5);
+        const hue = isAttackRange ? 180 + (tension * 120) : 180; // Only change hue in attack range
+        
+        ctx.beginPath();
+        ctx.arc(anchor.x, anchor.y, 25 + tension * 10, 0, Math.PI * 2);
+        ctx.strokeStyle = isAttackRange 
+          ? `hsla(${hue}, 100%, 70%, ${0.4 + tension * 0.4})`
+          : `rgba(0, 255, 204, 0.3)`;
+        ctx.lineWidth = isAttackRange ? 2 + tension * 4 : 1;
+        ctx.stroke();
+
+        // 2. Tether Line (The '紐')
+        ctx.beginPath();
+        const midX = (anchor.x + current.x) / 2;
+        const midY = (anchor.y + current.y) / 2;
+        
+        // Line vibration ONLY at high tension
+        const jitter = (isAttackRange && tension > 0.8) ? (Math.sin(Date.now() * 0.05) * (tension - 0.8) * 15) : 0;
+        
+        ctx.moveTo(anchor.x, anchor.y);
+        ctx.quadraticCurveTo(midX + jitter, midY + jitter, current.x, current.y);
+        
+        ctx.strokeStyle = isAttackRange
+          ? `hsla(${hue}, 100%, 60%, ${0.5 + tension * 0.5})`
+          : `rgba(0, 255, 204, 0.4)`;
+        ctx.lineWidth = isAttackRange ? 2 + tension * 5 : 1.5;
+        
+        if (!isAttackRange) {
+          ctx.setLineDash([5, 5]); // Dashed line for adjustment mode
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 3. Inner Core Glow
+        if (isAttackRange) {
+          ctx.beginPath();
+          ctx.arc(anchor.x, anchor.y, 5 + tension * 5, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${hue}, 100%, 80%, 0.8)`;
+          ctx.fill();
+        }
+
+        // 4. High Tension Sparks
+        if (tension > 1.0 && Date.now() % 3 === 0) {
+          createExplosion(current.x, current.y, '#ffffff', 1);
+          if (Math.random() > 0.5) {
+            createExplosion(current.x, current.y, `hsla(${hue}, 100%, 70%, 1)`, 1);
+          }
+        }
+        
+        ctx.restore();
+      }
     }
 
     // Ambush Warning removed
@@ -3746,8 +4594,18 @@ export default function App() {
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+    // Ghosting / Motion Trails (Trippy)
+    if (trippyIntensity.current > 0.4) {
+      mainCtx.save();
+      mainCtx.globalAlpha = 0.3 * trippyIntensity.current;
+      const offset = 5 * trippyIntensity.current;
+      mainCtx.drawImage(offscreenCanvas.current, offset, 0);
+      mainCtx.drawImage(offscreenCanvas.current, -offset, 0);
+      mainCtx.restore();
+    }
+
     // Radial Warp Streaks (Stylish Warp)
-    if (warpFactor.current > 0.1) {
+    if (warpFactor.current > 0.1 && !isMobile) {
       mainCtx.save();
       mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
       
@@ -3824,18 +4682,37 @@ export default function App() {
     }
 
     // Chromatic Aberration
-    const caIntensity = (isOverdriveActiveRef.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5);
+    const caIntensity = (isOverdriveActiveRef.current ? 4 : 0) + (warpFactor.current * 15) + (glitch.current * 0.5) + (trippyIntensity.current * 10);
     
     mainCtx.save();
-    if (warpFactor.current > 0.2) {
-      // Radial Distortion (Fisheye) - Toned down
-      const distortionScale = 1 + warpFactor.current * 0.03;
+    
+    // Kaleidoscope / Mirror Effect (Trippy)
+    if (trippyIntensity.current > 0.7) {
+      mainCtx.save();
+      mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+      mainCtx.scale(-1, 1);
+      mainCtx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
+      mainCtx.globalAlpha = 0.2 * trippyIntensity.current;
+      mainCtx.drawImage(offscreenCanvas.current, 0, 0);
+      mainCtx.restore();
+    }
+
+    // Trippy Hue Rotation - Disabled on mobile
+    if (trippyIntensity.current > 0.1 && !isMobile) {
+      const hue = (Date.now() / 50) % 360;
+      mainCtx.filter = `hue-rotate(${hue * trippyIntensity.current}deg) saturate(${100 + trippyIntensity.current * 100}%)`;
+    }
+
+    if (warpFactor.current > 0.2 || pulseRef.current > 0.1) {
+      // Radial Distortion (Fisheye) + Beat Pulse
+      const beatScale = pulseRef.current * 0.02 * trippyIntensity.current;
+      const distortionScale = 1 + warpFactor.current * 0.03 + beatScale;
       mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
       mainCtx.scale(distortionScale, distortionScale);
       mainCtx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
     }
 
-    if (caIntensity > (isMobile ? 2 : 0.5)) {
+    if (caIntensity > (isMobile ? 4 : 0.5)) {
       mainCtx.globalCompositeOperation = 'screen';
       // Red
       mainCtx.drawImage(offscreenCanvas.current, -caIntensity, 0);
@@ -3848,10 +4725,10 @@ export default function App() {
       mainCtx.drawImage(offscreenCanvas.current, 0, 0);
     }
 
-    // Glitch Effect
+    // Glitch Effect - Reduced on mobile
     if (glitch.current > 1) {
       const glitchAmount = glitch.current;
-      const glitchCount = isMobile ? 2 : 5;
+      const glitchCount = isMobile ? 1 : 4;
       for (let i = 0; i < glitchCount; i++) {
         const x = Math.random() * CANVAS_WIDTH;
         const y = Math.random() * CANVAS_HEIGHT;
@@ -3862,21 +4739,25 @@ export default function App() {
       }
     }
 
-    // Scanlines
-    mainCtx.fillStyle = 'rgba(18, 16, 16, 0.1)';
-    for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
-      mainCtx.fillRect(0, i, CANVAS_WIDTH, 1);
+    // Scanlines - Disabled on mobile
+    if (!isMobile) {
+      mainCtx.fillStyle = 'rgba(18, 16, 16, 0.1)';
+      for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
+        mainCtx.fillRect(0, i, CANVAS_WIDTH, 1);
+      }
     }
 
-    // Vignette
-    const gradient = mainCtx.createRadialGradient(
-      CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 4,
-      CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 1.2
-    );
-    gradient.addColorStop(0, 'rgba(0,0,0,0)');
-    gradient.addColorStop(1, 'rgba(0,0,0,0.4)');
-    mainCtx.fillStyle = gradient;
-    mainCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // Vignette - Disabled on mobile
+    if (!isMobile) {
+      const gradient = mainCtx.createRadialGradient(
+        CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 4,
+        CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 1.2
+      );
+      gradient.addColorStop(0, 'rgba(0,0,0,0)');
+      gradient.addColorStop(1, 'rgba(0,0,0,0.4)');
+      mainCtx.fillStyle = gradient;
+      mainCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
 
     // Static Noise
     if (Math.random() > 0.9) {
@@ -4011,15 +4892,7 @@ export default function App() {
             <div className="flex flex-col items-end gap-2">
               <div className="flex items-center gap-3">
                 <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
-                <button 
-                  onClick={() => {
-                    if (overdrive >= MAX_OVERDRIVE && !isOverdriveActive) {
-                      activateOverdrive();
-                    }
-                  }}
-                  disabled={overdrive < MAX_OVERDRIVE || isOverdriveActive}
-                  className={`w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative cursor-pointer transition-all ${overdrive >= MAX_OVERDRIVE && !isOverdriveActive ? 'border-[#ff3366] shadow-[0_0_15px_rgba(255,51,102,0.4)]' : ''}`}
-                >
+                <div className="w-36 h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-[1px] relative transition-all">
                   <motion.div 
                     animate={overdrive >= MAX_OVERDRIVE && !isOverdriveActive 
                       ? { 
@@ -4037,12 +4910,7 @@ export default function App() {
                     }
                     className="h-full rounded-full shadow-[0_0_20px_rgba(255,51,102,0.6)]"
                   />
-                  {overdrive >= MAX_OVERDRIVE && !isOverdriveActive && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-[7px] text-white font-black uppercase tracking-tighter animate-pulse">Tap to Burst</span>
-                    </div>
-                  )}
-                </button>
+                </div>
               </div>
             </div>
           </div>
@@ -4304,46 +5172,135 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-4 md:p-8 text-center overflow-hidden z-[100]"
+              className="absolute inset-0 bg-[#020205] flex flex-col items-center justify-center overflow-hidden z-[100]"
             >
-              <motion.div
-                animate={{ y: [0, -10, 0], rotate: [0, 3, -3, 0] }}
-                transition={{ duration: 4, repeat: Infinity }}
-                className="mb-4 md:mb-8"
-              >
-                <NeonShip className="w-20 h-20 md:w-32 md:h-32 drop-shadow-[0_0_20px_rgba(0,255,204,0.6)]" />
-              </motion.div>
-              <h1 className="text-4xl md:text-6xl font-black mb-2 md:mb-4 tracking-tighter italic text-transparent bg-clip-text bg-gradient-to-b from-white via-gray-300 to-gray-600">
-                NEON DEFENDER
-              </h1>
-              <p className="text-gray-400 mb-6 md:mb-10 max-w-[280px] md:max-w-xs text-xs md:text-sm leading-relaxed tracking-wide">
-                The swarm is approaching. <br/>Engage thrusters and defend the sector.
-              </p>
-              <div className="flex flex-col gap-4 w-64">
-                <button
-                  onClick={startGame}
-                  className="group relative px-8 py-4 bg-[#00ffcc] text-black font-black uppercase tracking-[0.2em] overflow-hidden transition-all hover:scale-105 active:scale-95"
-                >
-                  <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-[-20deg]" />
-                  <span className="relative z-10 flex items-center justify-center gap-2">
-                    <Play className="w-5 h-5 fill-current" />
-                    START RUN
-                  </span>
-                </button>
+              {/* High-End Background Elements */}
+              <div className="absolute inset-0 pointer-events-none">
+                {/* Large, very subtle radial gradient */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-radial from-[#00ffcc]/10 to-transparent opacity-30" />
+                
+                {/* Technical Grid Accent */}
+                <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#00ffcc 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+                
+                {/* Vertical Rail Text */}
+                <div className="absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-24 opacity-20">
+                  <span className="writing-vertical-rl rotate-180 text-[8px] uppercase tracking-[1em] font-black text-white">System_Active</span>
+                  <span className="writing-vertical-rl rotate-180 text-[8px] uppercase tracking-[1em] font-black text-[#00ffcc]">Protocol_Neon</span>
+                </div>
               </div>
-              <div className="mt-8 md:mt-16 grid grid-cols-3 gap-4 md:gap-8 text-[8px] md:text-[10px] text-gray-500 uppercase tracking-[0.4em]">
-                <div className="flex flex-col gap-1 md:gap-2">
-                  <span className="text-gray-400">Movement</span>
-                  <span>{isTouchDevice ? 'Drag Anywhere' : 'Arrow Keys'}</span>
+
+              <motion.div
+                initial={{ y: 30, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
+                className="relative flex flex-col items-center w-full max-w-lg"
+              >
+                {/* Central Ship Display */}
+                <motion.div
+                  animate={{ 
+                    y: [0, -15, 0],
+                    rotateZ: [-1, 1, -1],
+                    filter: [
+                      "drop-shadow(0 0 30px rgba(0,255,204,0.2))", 
+                      "drop-shadow(0 0 60px rgba(0,255,204,0.4))", 
+                      "drop-shadow(0 0 30px rgba(0,255,204,0.2))"
+                    ]
+                  }}
+                  transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+                  className="mb-12"
+                >
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-[#00ffcc]/20 blur-2xl rounded-full scale-150 animate-pulse" />
+                    <NeonShip 
+                      className="w-28 h-28 md:w-32 md:h-32 relative z-10" 
+                      tension={0.08}
+                    />
+                  </div>
+                </motion.div>
+
+                {/* Editorial Typography Title */}
+                <div className="text-center mb-16 relative">
+                  <motion.div
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: 1 }}
+                    transition={{ delay: 0.5, duration: 0.8 }}
+                    className="absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-[1px] bg-[#00ffcc]/40"
+                  />
+                  
+                  <h1 className="flex flex-col items-center leading-none">
+                    <span className="text-7xl md:text-8xl font-black italic tracking-tighter text-white/10 absolute -top-8 select-none">
+                      DEFENDER
+                    </span>
+                    <span className="text-5xl md:text-6xl font-black italic tracking-tight text-white relative z-10">
+                      NEON <span className="text-[#00ffcc] drop-shadow-[0_0_20px_#00ffcc]">DEFENDER</span>
+                    </span>
+                  </h1>
+                  
+                  <div className="flex items-center justify-center gap-4 mt-6">
+                    <span className="text-[7px] uppercase tracking-[0.8em] font-black text-gray-500">Combat_Simulation</span>
+                    <div className="w-1 h-1 bg-[#00ffcc] rounded-full animate-ping" />
+                    <span className="text-[7px] uppercase tracking-[0.8em] font-black text-gray-500">v2.5_Stable</span>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1 md:gap-2">
-                  <span className="text-gray-400">Weapon</span>
-                  <span>{isTouchDevice ? 'Auto-Fire' : 'Space Bar'}</span>
+
+                {/* Refined Neon Button */}
+                <div className="flex flex-col items-center gap-12 w-full">
+                  <button
+                    onClick={startGame}
+                    className="group relative px-16 py-5 overflow-hidden transition-all duration-500"
+                  >
+                    {/* Button Background Glow */}
+                    <div className="absolute inset-0 bg-[#00ffcc]/0 group-hover:bg-[#00ffcc]/5 transition-colors duration-500" />
+                    
+                    {/* Neon Frame with Flickering Effect */}
+                    <div className="absolute inset-0 border border-[#00ffcc]/30 group-hover:border-[#00ffcc] transition-colors duration-500" />
+                    <motion.div 
+                      animate={{ opacity: [1, 0.8, 1, 0.9, 1] }}
+                      transition={{ duration: 0.2, repeat: Infinity, repeatDelay: Math.random() * 5 }}
+                      className="absolute inset-0 border-2 border-[#00ffcc] shadow-[0_0_15px_rgba(0,255,204,0.3)] group-hover:shadow-[0_0_30px_rgba(0,255,204,0.6)] transition-shadow duration-500" 
+                    />
+                    
+                    {/* Corner Accents */}
+                    <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-[#00ffcc]" />
+                    <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-[#00ffcc]" />
+                    
+                    <span className="relative z-10 text-[#00ffcc] font-black uppercase tracking-[0.5em] text-[11px] group-hover:text-white transition-colors duration-300">
+                      Engage Mission
+                    </span>
+                    
+                    {/* Internal Scanline Effect */}
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-10 pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,255,204,0.5)_50%)] bg-[length:100%_4px]" />
+                  </button>
+
+                  {/* High-End Stats Display */}
+                  <div className="flex items-center justify-center gap-16 w-full max-w-xs border-t border-white/5 pt-8">
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="text-[7px] uppercase tracking-[0.3em] text-gray-600 font-black">Global_Record</span>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-xl font-mono font-black text-white/90">{highScore.toLocaleString()}</span>
+                        <span className="text-[6px] text-gray-700 font-bold">PTS</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-[7px] uppercase tracking-[0.3em] text-gray-600 font-black">System_Status</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 bg-[#00ffcc] rounded-full shadow-[0_0_8px_#00ffcc]" />
+                        <span className="text-xs font-mono font-black text-[#00ffcc] uppercase tracking-widest">Online</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1 md:gap-2">
-                  <span className="text-gray-400">Overdrive</span>
-                  <span>{isTouchDevice ? 'Tap Icon' : 'X Key'}</span>
+              </motion.div>
+
+              {/* Minimal Footer Instructions */}
+              <div className="absolute bottom-12 flex flex-col items-center gap-3 opacity-30">
+                <div className="flex gap-12 text-[7px] font-black tracking-[0.6em] text-white uppercase">
+                  <span>Drag to Tension</span>
+                  <div className="w-1 h-1 bg-white rounded-full self-center" />
+                  <span>Release to Snap</span>
                 </div>
+                <div className="w-32 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent" />
               </div>
             </motion.div>
           )}
@@ -4406,25 +5363,6 @@ export default function App() {
           )}
         </AnimatePresence>
       </div>
-
-      {/* Touch Feedback */}
-      {isTouchDevice && isTouching.current && (
-        <motion.div 
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 0.3 }}
-          style={{ 
-            position: 'fixed', 
-            left: touchStartPos.current.x - 30, 
-            top: touchStartPos.current.y - 30,
-            width: 60,
-            height: 60,
-            borderRadius: '50%',
-            border: '2px solid #00ffcc',
-            pointerEvents: 'none',
-            zIndex: 100
-          }}
-        />
-      )}
 
       {/* Footer & Fullscreen */}
       <div className="mt-8 text-[9px] text-gray-700 uppercase tracking-[0.5em] flex items-center gap-4">

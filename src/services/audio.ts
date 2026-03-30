@@ -2,6 +2,7 @@ class RetroAudio {
   ctx: AudioContext | null = null;
   bgmInterval: number | null = null;
   bgmStep: number = 0;
+  pulse: number = 0;
   masterGain: GainNode | null = null;
   compressor: DynamicsCompressorNode | null = null;
 
@@ -225,6 +226,26 @@ class RetroAudio {
     
     osc.start();
     osc.stop(this.ctx.currentTime + 0.5);
+  }
+
+  playSlingshot() {
+    if (!this.ctx || !this.masterGain) return;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    
+    // Snapping sound: High to low frequency very quickly
+    osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.15);
+    
+    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
+    
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.15);
   }
 
   playPowerDown() {
@@ -575,8 +596,22 @@ class RetroAudio {
       const globalFilter = this.ctx.createBiquadFilter();
       globalFilter.type = 'lowpass';
       globalFilter.frequency.value = sweepFreq;
-      globalFilter.Q.value = 1;
+      globalFilter.Q.value = 2; // Increased resonance for "trippy" feel
       globalFilter.connect(this.masterGain);
+
+      // Delay effect for "trippy" spacey feel
+      const delay = this.ctx.createDelay(1.0);
+      delay.delayTime.value = 0.375; // Dotted 8th note delay
+      const delayGain = this.ctx.createGain();
+      delayGain.gain.value = 0.3;
+      const delayFeedback = this.ctx.createGain();
+      delayFeedback.gain.value = 0.4;
+
+      globalFilter.connect(delay);
+      delay.connect(delayFeedback);
+      delayFeedback.connect(delay);
+      delay.connect(delayGain);
+      delayGain.connect(this.masterGain);
       
       // Kick Drum on 1, 5, 9, 13
       if (step % 4 === 0) {
@@ -592,18 +627,18 @@ class RetroAudio {
         kickOsc.start();
         kickOsc.stop(this.ctx.currentTime + 0.1);
 
-        // Click for the kick
-        const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.01, this.ctx.sampleRate);
-        const noiseData = noiseBuffer.getChannelData(0);
-        for(let i=0; i<noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
-        const noise = this.ctx.createBufferSource();
-        noise.buffer = noiseBuffer;
-        const noiseGain = this.ctx.createGain();
-        noiseGain.gain.setValueAtTime(0.1, this.ctx.currentTime);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.01);
-        noise.connect(noiseGain);
-        noiseGain.connect(globalFilter);
-        noise.start();
+        // Sub-bass thump
+        const subOsc = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(60, this.ctx.currentTime);
+        subOsc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.2);
+        subGain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        subGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+        subOsc.connect(subGain);
+        subGain.connect(this.masterGain);
+        subOsc.start();
+        subOsc.stop(this.ctx.currentTime + 0.2);
       }
 
       // Snare/Hi-hat on off-beats
@@ -633,6 +668,9 @@ class RetroAudio {
         filter.frequency.value = stage === 2 ? 200 : 400; // Muffled for asteroid belt
 
         bassOsc.frequency.setValueAtTime(bassFreq / 2, this.ctx.currentTime);
+        // Add a bit of glide/portamento
+        bassOsc.frequency.exponentialRampToValueAtTime(bassFreq / 2 * 0.9, this.ctx.currentTime + 0.1);
+
         bassGain.gain.setValueAtTime(0.1, this.ctx.currentTime);
         bassGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
         
@@ -644,7 +682,7 @@ class RetroAudio {
       }
 
       // Lead Synth (Arpeggio/Syncopated)
-      if (step % 3 === 0 || step === 7 || step === 14) {
+      if (step % 3 === 0 || step === 7 || step === 14 || (stage >= 4 && Math.random() > 0.5)) {
         const leadFreq = currentScale[Math.floor(this.bgmStep / 4) % currentScale.length] * 2;
         const leadOsc = this.ctx.createOscillator();
         const leadGain = this.ctx.createGain();
@@ -652,10 +690,17 @@ class RetroAudio {
         
         const leadFilter = this.ctx.createBiquadFilter();
         leadFilter.type = 'bandpass';
-        leadFilter.frequency.value = 1000 + Math.sin(this.bgmStep * 0.1) * 500;
-        leadFilter.Q.value = 5;
+        // Trippy filter modulation
+        const modFreq = 1000 + Math.sin(this.bgmStep * 0.2) * 800;
+        leadFilter.frequency.value = modFreq;
+        leadFilter.Q.value = 8;
 
         leadOsc.frequency.setValueAtTime(leadFreq, this.ctx.currentTime);
+        // Random pitch blips for "glitch" feel
+        if (Math.random() > 0.9) {
+          leadOsc.frequency.exponentialRampToValueAtTime(leadFreq * 2, this.ctx.currentTime + 0.05);
+        }
+
         leadGain.gain.setValueAtTime(0.03, this.ctx.currentTime);
         leadGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
         
@@ -666,8 +711,31 @@ class RetroAudio {
         leadOsc.stop(this.ctx.currentTime + 0.2);
       }
 
+      // Atmospheric Pad (Trippy drone)
+      if (this.bgmStep % 32 === 0) {
+        const padOsc = this.ctx.createOscillator();
+        const padGain = this.ctx.createGain();
+        padOsc.type = 'sine';
+        padOsc.frequency.setValueAtTime(currentScale[0], this.ctx.currentTime);
+        
+        padGain.gain.setValueAtTime(0, this.ctx.currentTime);
+        padGain.gain.linearRampToValueAtTime(0.05, this.ctx.currentTime + 2.0);
+        padGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 4.0);
+        
+        padOsc.connect(padGain);
+        padGain.connect(this.masterGain);
+        padOsc.start();
+        padOsc.stop(this.ctx.currentTime + 4.0);
+      }
+
       this.bgmStep++;
+      this.pulse = 1.0;
     }, speed);
+  }
+
+  getPulse() {
+    this.pulse *= 0.9; // Decay pulse
+    return this.pulse;
   }
 
   playScrap() {
