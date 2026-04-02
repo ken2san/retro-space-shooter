@@ -47,6 +47,7 @@ const VFX_SLINGSHOT_TRAIL_ALPHA = 0.42;
 const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
 const SLINGSHOT_GUARD_SMALL_MS = 280;
 const SLINGSHOT_GUARD_LARGE_MS = 450;
+const SLINGSHOT_COMBO_WINDOW_MS = 1200;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1891,6 +1892,29 @@ export default function App() {
     });
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
+    const frameNow = Date.now();
+    const isSlingshotAttacking = frameNow < slingshotAttackUntil.current;
+    const registerSlingshotCombo = (basePoints: number) => {
+      if (!isSlingshotAttacking) return;
+
+      if (frameNow - lastHitTime.current < SLINGSHOT_COMBO_WINDOW_MS) {
+        comboRef.current += 1;
+      } else {
+        comboRef.current = 1;
+      }
+      lastHitTime.current = frameNow;
+      setCombo(comboRef.current);
+
+      const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.15);
+      setScore((s) => s + basePoints + comboBonus);
+
+      if (!isOverdriveActiveRef.current) {
+        const gaugeGain = Math.min(3.5, 1.4 + comboRef.current * 0.25);
+        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + gaugeGain);
+        setOverdrive(overdriveGauge.current);
+      }
+    };
+
     asteroids.current.forEach(a => {
       // Movement with inertia
       a.x += (a.dx + a.vx) * worldSpeedScale * dt;
@@ -1925,9 +1949,18 @@ export default function App() {
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - a.x;
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < a.size * 0.5 && Date.now() > invulnerableUntil.current) {
-        handlePlayerHit();
-        a.hp = 0; // Destroy on impact
+      if (dist < a.size * 0.5) {
+        if (isSlingshotAttacking || isOverdriveActiveRef.current) {
+          if (a.hp > 0) {
+            a.hp = 0;
+            createExplosion(a.x, a.y, '#00ffcc', 25);
+            audio.playExplosion(a.x);
+            registerSlingshotCombo(120);
+          }
+        } else if (Date.now() > invulnerableUntil.current) {
+          handlePlayerHit();
+          a.hp = 0; // Destroy on impact
+        }
       }
 
       // Collision with enemies (Kinetic Weapon)
@@ -3002,7 +3035,6 @@ export default function App() {
     const ph = PLAYER_HEIGHT - hitMargin * 2;
 
     let playerHit = false;
-    const isSlingshotAttacking = Date.now() < slingshotAttackUntil.current;
 
     for (let i = 0; i < aliveEnemies.length; i++) {
       const enemy = aliveEnemies[i];
@@ -3027,6 +3059,9 @@ export default function App() {
             enemy.alive = false;
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#00ffcc', 40);
             audio.playEnemyHit(enemy.x + enemy.width / 2);
+            if (isSlingshotAttacking) {
+              registerSlingshotCombo(enemy.isDiving ? 280 : 180);
+            }
           } else {
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ffffff', 15);
             audio.playEnemyHit(enemy.x + enemy.width / 2);
