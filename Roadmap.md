@@ -154,12 +154,12 @@ Execution steps:
 4. Record one row in the table below.
 5. Repeat at least 3 runs and use median values as the baseline reference.
 
-| Run Date   | Build/Commit | Scenario                           | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes    |
-| ---------- | ------------ | ---------------------------------- | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | -------- |
-| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -     | -       | -            | -            | -       | -       | -             | -         | run-1 |
-| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -     | -       | -            | -            | -       | -       | -             | -         | run-2 |
-| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -     | -       | -            | -            | -       | -       | -             | -         | run-3 |
-| YYYY-MM-DD | <commit>     | Median (run-1..run-3)             | -       | -       | -            | -            | -       | -       | -             | -         | baseline reference |
+| Run Date   | Build/Commit | Scenario                             | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes              |
+| ---------- | ------------ | ------------------------------------ | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | ------------------ |
+| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-1              |
+| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-2              |
+| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -       | -       | -            | -            | -       | -       | -             | -         | run-3              |
+| YYYY-MM-DD | <commit>     | Median (run-1..run-3)                | -       | -       | -            | -            | -       | -       | -             | -         | baseline reference |
 
 - Next (execute in order)
   - Finalize P4-1 baseline capture table with 3 manual runs and median values
