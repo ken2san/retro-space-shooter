@@ -982,25 +982,19 @@ export default function App() {
 
       // 1. DEADZONE / ADJUSTMENT MODE (Small pull)
       if (dist < SLINGSHOT_THRESHOLD + 30) {
-        if (isFlick && dist > 20) {
-          const flickPower = Math.min(inputSpeed / 1000, 2.0);
-          const speed = 25 + flickPower * 40;
-          // Always fire in slingshot direction (dirX/Y), not inputVel direction.
-          // inputVel may retain drag-direction velocity from smoothing, which would
-          // send the ship the wrong way and cause a visible bounce-back on mobile.
+        if (dist > 20) {
+          const pullRatio = Math.min(dist / (SLINGSHOT_THRESHOLD + 30), 1);
+          const baseSpeed = 6 + pullRatio * 10;
+          const flickBoost = isFlick ? Math.min((inputSpeed - 400) / 1600, 0.35) : 0;
+          const speed = baseSpeed * (1 + flickBoost);
+          // Keep launch direction tied to slingshot direction; flick only boosts speed.
           playerVel.current.x = dirX * speed;
           playerVel.current.y = dirY * speed;
 
           createExplosion(centerX, centerY, '#00ffcc', isMobile ? 3 : 6);
           shake.current = Math.max(shake.current, 2);
           audio.playSlingshot?.();
-          isSnapping.current = 15;
-        } else if (dist > 50) {
-          const speed = 15 + (dist / SLINGSHOT_THRESHOLD) * 25;
-          playerVel.current.x = dirX * speed;
-          playerVel.current.y = dirY * speed;
-          audio.playSlingshot?.();
-          isSnapping.current = 10;
+          isSnapping.current = 8;
         }
       }
       // 2. ATTACK MODE (Large pull)
@@ -1009,8 +1003,8 @@ export default function App() {
         const tensionRatio = Math.min(attackDist / 350, 3.5);
         const totalPower = Math.pow(tensionRatio, 1.7);
 
-        const baseSnapSpeed = 45;
-        const speed = baseSnapSpeed + (totalPower * 85);
+        const baseSnapSpeed = 12;
+        const speed = Math.min(38, baseSnapSpeed + (totalPower * 20));
 
         // Combine with flick if in similar direction
         let finalVelX = dirX * speed;
@@ -1046,7 +1040,7 @@ export default function App() {
         audio.playSlingshot?.();
         if (totalPower > 0.5) audio.playOverdrive?.();
 
-        isSnapping.current = 20; // Longer snap phase for big attacks
+        isSnapping.current = 12; // Longer snap phase for big attacks
 
         const shockwaveRadius = 150 + (totalPower * 200);
         enemyBullets.current.forEach(b => {
