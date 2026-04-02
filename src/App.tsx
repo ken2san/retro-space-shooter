@@ -4660,14 +4660,6 @@ export default function App() {
             const sCenterX = playerStartPos.current.x + PLAYER_WIDTH / 2;
             const sCenterY = playerStartPos.current.y + PLAYER_HEIGHT / 2;
 
-            // 0. Threshold Barrier (Centered on Ship's Start Position)
-            ctx.beginPath();
-            ctx.arc(sCenterX, sCenterY, SLINGSHOT_THRESHOLD, 0, Math.PI * 2);
-            ctx.strokeStyle = isSlingshotCharged.current ? `rgba(0, 255, 204, 0.2)` : `rgba(255, 255, 255, 0.05)`;
-            ctx.setLineDash([10, 20]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
             // Predicted landing point on the threshold ring (release stop position)
             if (dist > 5) {
               const pullMag = Math.sqrt(dx * dx + dy * dy) || 1;
