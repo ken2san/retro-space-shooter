@@ -109,9 +109,16 @@ Raise the quality bar on performance, mobile UX, and audio.
   - Added lightweight in-game performance overlay in `src/App.tsx`
     - Displays FPS p50/p95, frame time p50/p95, and live object counts
     - Updates at 500ms intervals with bounded sample windows to keep overhead low
+  - Enemy dive movement and ambush timer fixes
+    - All dive y-movement types (zigzag/sweep/sine/normal) now multiply by dt
+    - Ambush timer uses actual frame time instead of hardcoded 16ms
+  - Boss movement and boss timer fixes
+    - Path-follow entry movement now dt-scaled
+    - Boss lateral movement now dt-scaled
+    - Tractor beam timer and laser rotation timer use dt-based ms instead of 16ms
 - Next
-  - Run 60s baseline captures per fixed scenario and store benchmark snapshots
-  - Continue hotspot cleanup using the baseline -> fix -> re-measure loop
+  - Run 60s baseline captures per fixed scenario and compare perf overlay values
+  - Audit remaining hotspots: star/particle movement, formation float, asteroid drift
 
 ---
 

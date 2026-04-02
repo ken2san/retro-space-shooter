@@ -2259,8 +2259,8 @@ export default function App() {
             enemy.state = 'IN_FORMATION';
           }
         } else {
-          enemy.x += (dx / dist) * 8;
-          enemy.y += (dy / dist) * 8;
+          enemy.x += (dx / dist) * 8 * dt;
+          enemy.y += (dy / dist) * 8 * dt;
         }
         return;
       }
@@ -2275,7 +2275,7 @@ export default function App() {
           let moveSpeed = enemy.bossType === BossType.LASER ? 0.5 : 1.5;
           if (enemy.phase === 3) moveSpeed *= 1.5;
 
-          enemy.x += (enemy.moveDir || 1) * moveSpeed;
+          enemy.x += (enemy.moveDir || 1) * moveSpeed * dt;
           if (enemy.x < 50 || enemy.x > CANVAS_WIDTH - enemy.width - 50) {
             enemy.moveDir = (enemy.moveDir || 1) * -1;
           }
@@ -2286,7 +2286,7 @@ export default function App() {
 
           // Boss specific behaviors
           if (enemy.bossType === BossType.TRACTOR) {
-            enemy.tractorBeamTimer += 16 * timeScale.current * dt;
+            enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current;
             if (!enemy.isTractorBeaming && enemy.tractorBeamTimer > 3000) {
               enemy.isTractorBeaming = true;
               enemy.tractorBeamTimer = 0;
@@ -2387,7 +2387,7 @@ export default function App() {
             }
           } else if (enemy.bossType === BossType.LASER) {
             // Rotating Laser Beams
-            enemy.tractorBeamTimer += 16 * timeScale.current * dt; // Using this as rotation angle
+            enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current; // Using this as rotation angle
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
             const laserCount = enemy.phase === 3 ? 4 : 2;
 
