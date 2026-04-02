@@ -640,7 +640,7 @@ export default function App() {
       { id: 'CHAIN', label: 'Tesla Arc', desc: 'Bullets jump between nearby enemies.' },
       { id: 'DRONE', label: 'Tactical Drone', desc: 'Deploy an orbiting support drone.' },
       { id: 'REGEN', label: 'Nano-Repair', desc: 'Slowly regenerate hull integrity.' },
-      { id: 'SHIELD_REGEN', label: 'Aegis Protocol', desc: 'Gain a temporary shield.' },
+      { id: 'SHIELD_REGEN', label: 'Aegis Protocol', desc: 'Absorbs one hit; recharges every 20s.' },
       { id: 'WINGMAN', label: 'Wingman Support', desc: 'Summon a combat support ship.' },
       { id: 'FRENZY', label: 'Overdrive Sync', desc: 'Overdrive lasts 50% longer.' },
       { id: 'CHRONO', label: 'Chrono-Trigger', desc: 'Chance to slow time on enemy kill.' },
@@ -682,7 +682,7 @@ export default function App() {
       case 'SPEED': speedRef.current += 0.2; break;
       case 'MAGNET': magnetRef.current += 0.5; break;
       case 'CRIT': critChanceRef.current += 0.1; break;
-      case 'REGEN': regenRef.current += 0.001; break;
+      case 'REGEN': regenRef.current += 0.5; break;
       case 'CHAIN': chainLightningRef.current += 0.2; break;
       case 'CHRONO': /* Handled in kill logic */ break;
       case 'EMP': /* Handled in hit logic */ break;
@@ -900,7 +900,7 @@ export default function App() {
 
         // Brief time slow/freeze for tactile feedback
         timeScale.current = 0.2;
-        setTimeout(() => { timeScale.current = 1.0; }, 100);
+        setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -951,7 +951,7 @@ export default function App() {
 
           // Brief time slow/freeze for tactile feedback
           timeScale.current = 0.2;
-          setTimeout(() => { timeScale.current = 1.0; }, 100);
+          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
         } else {
           isSlingshotMode.current = false;
           playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
@@ -1235,7 +1235,7 @@ export default function App() {
           shake.current = Math.max(shake.current, 5);
           createExplosion(x, y, '#00ffcc', 20);
           timeScale.current = 0.2;
-          setTimeout(() => { timeScale.current = 1.0; }, 100);
+          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
           return;
         }
 
@@ -1258,7 +1258,7 @@ export default function App() {
           shake.current = Math.max(shake.current, 5);
           createExplosion(x, y, '#00ffcc', 20);
           timeScale.current = 0.2;
-          setTimeout(() => { timeScale.current = 1.0; }, 100);
+          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
         } else if (isRightClick) {
           isSlingshotMode.current = true;
           mouseAnchorPos.current = { x, y };
@@ -1268,7 +1268,7 @@ export default function App() {
 
           // Brief time slow/freeze for tactile feedback
           timeScale.current = 0.2;
-          setTimeout(() => { timeScale.current = 1.0; }, 100);
+          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
         } else {
           isSlingshotMode.current = false;
           mouseAnchorPos.current = { x, y }; // Still need anchor for relative movement
@@ -1469,7 +1469,7 @@ export default function App() {
     isOverdriveActiveRef.current = true;
     setIsOverdriveActive(true);
     const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
-    const duration = hasFrenzy ? 8000 : 6000; // Nerfed duration (10-15s -> 6-8s)
+    const duration = hasFrenzy ? 9000 : 6000; // Base 6s; FRENZY extends to 9s (+50%)
     overdriveEndTime.current = Date.now() + duration;
     shake.current = 30;
     flash.current = 0.5;
@@ -1532,6 +1532,22 @@ export default function App() {
     // Overdrive Tactical Slow-mo: Enemies move slower while player is in Overdrive
     if (isOverdriveActiveRef.current) {
       timeScale.current = 0.6;
+    }
+
+    // SHIELD_REGEN: auto-recharge shield every 20s when consumed
+    if (relicsRef.current.some(r => r.id === 'SHIELD_REGEN')) {
+      const now = Date.now();
+      const shieldActive = activeEffects.current['SHIELD'] > now;
+      if (!shieldActive) {
+        if (!activeEffects.current['SHIELD_RECHARGE']) {
+          activeEffects.current['SHIELD_RECHARGE'] = now + 20000;
+        } else if (now > activeEffects.current['SHIELD_RECHARGE']) {
+          activeEffects.current['SHIELD'] = now + 10000;
+          activeEffects.current['SHIELD_RECHARGE'] = 0;
+        }
+      } else {
+        activeEffects.current['SHIELD_RECHARGE'] = 0;
+      }
     }
 
     // Spawn Asteroids
@@ -2900,7 +2916,7 @@ export default function App() {
               enemy.alive = false;
 
               // Chrono Trigger
-              if (relicsRef.current.some(r => r.id === 'CHRONO') && Math.random() < 0.05) {
+              if (relicsRef.current.some(r => r.id === 'CHRONO') && !isOverdriveActiveRef.current && Math.random() < 0.15) {
                 timeScale.current = 0.3;
               }
 
@@ -2966,7 +2982,7 @@ export default function App() {
           }
 
           // Chrono Trigger
-          if (relicsRef.current.some(r => r.id === 'CHRONO') && Math.random() < 0.05) {
+          if (relicsRef.current.some(r => r.id === 'CHRONO') && !isOverdriveActiveRef.current && Math.random() < 0.15) {
             timeScale.current = 0.3;
           }
           playerBullets.splice(i, 1);
