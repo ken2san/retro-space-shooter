@@ -20,6 +20,7 @@ import {
 } from './types';
 import NeonShip from './components/NeonShip';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
+import { bindInputListeners } from './hooks/useInput';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1274,31 +1275,20 @@ export default function App() {
       keysPressed.current = {};
     };
 
-    window.addEventListener('keydown', handleKeyDown, { passive: false });
-    window.addEventListener('keyup', handleKeyUp, { passive: false });
-    window.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('pointerup', handleMouseUp);
-    window.addEventListener('touchstart', handleTouchStart, { passive: false });
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd);
-    window.addEventListener('touchcancel', handleTouchEnd);
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('contextmenu', (e) => e.preventDefault()); // Prevent right-click menu
+    const unbindInputListeners = bindInputListeners({
+      onKeyDown: handleKeyDown,
+      onKeyUp: handleKeyUp,
+      onMouseDown: handleMouseDown,
+      onMouseMove: handleMouseMove,
+      onMouseUp: handleMouseUp,
+      onTouchStart: handleTouchStart,
+      onTouchMove: handleTouchMove,
+      onTouchEnd: handleTouchEnd,
+      onBlur: handleBlur,
+    });
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('pointerup', handleMouseUp);
-      window.removeEventListener('touchstart', handleTouchStart);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchEnd);
-      window.removeEventListener('blur', handleBlur);
+      unbindInputListeners();
       clearVirtualDragReleaseTimer();
       if (idleFireTimer.current !== null) { window.clearTimeout(idleFireTimer.current); idleFireTimer.current = null; }
     };
