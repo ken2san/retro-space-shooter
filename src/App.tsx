@@ -1407,6 +1407,8 @@ export default function App() {
 
     const isAsteroidBelt = currentStage === 2;
     const isFinalFront = currentStage === 5;
+    const stageFlowScale = isAsteroidBelt ? (isMobile ? 0.82 : 0.9) : 1;
+    const worldSpeedScale = timeScale.current * stageFlowScale;
 
     // Apply slow-mo recovery
     if (timeScale.current < 1.0 && !isOverdriveActiveRef.current) {
@@ -1439,7 +1441,9 @@ export default function App() {
       const spawnRate = isAsteroidBelt ? (isMobile ? 0.006 : 0.014) : (isMobile ? 0.008 : 0.02);
       const maxAsteroids = isAsteroidBelt ? (isMobile ? 8 : 12) : 999;
       if (asteroids.current.length < maxAsteroids && Math.random() < spawnRate) {
-        const size = 30 + Math.random() * 60;
+        const rawSize = 30 + Math.random() * 60;
+        const sizeScale = isAsteroidBelt ? (isMobile ? 0.72 : 0.86) : 1;
+        const size = Math.max(22, rawSize * sizeScale);
         const vertexCount = isMobile ? 5 : 8;
         const vertices = [];
         for (let i = 0; i < vertexCount; i++) {
@@ -1818,7 +1822,7 @@ export default function App() {
     }
 
     // Maze Generation (Canyon)
-    const scrollSpeed = 3 * timeScale.current;
+    const scrollSpeed = 3 * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
     if (lastBlockRowY.current > 100) {
       lastBlockRowY.current = 0;
@@ -1869,9 +1873,9 @@ export default function App() {
 
     asteroids.current.forEach(a => {
       // Movement with inertia
-      a.x += (a.dx + a.vx) * timeScale.current * dt;
-      a.y += (a.speed + a.vy) * timeScale.current * dt;
-      a.rotation += a.vr * timeScale.current * dt;
+      a.x += (a.dx + a.vx) * worldSpeedScale * dt;
+      a.y += (a.speed + a.vy) * worldSpeedScale * dt;
+      a.rotation += a.vr * worldSpeedScale * dt;
 
       // Friction for vx/vy
       a.vx *= Math.pow(0.98, dt);
@@ -2173,7 +2177,7 @@ export default function App() {
     }
 
     // Update enemy bullets
-    const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * timeScale.current;
+    const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * worldSpeedScale;
     const enemyBulletList = enemyBullets.current;
     for (let i = enemyBulletList.length - 1; i >= 0; i--) {
       const b = enemyBulletList[i];
@@ -2199,8 +2203,8 @@ export default function App() {
 
       b.vx = vx;
       b.vy = vy;
-      b.x += vx * timeScale.current * dt;
-      b.y += vy * dt;
+      b.x += vx * worldSpeedScale * dt;
+      b.y += vy * stageFlowScale * dt;
 
       if (b.y > CANVAS_HEIGHT + 20 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
         enemyBulletList.splice(i, 1);
@@ -2286,7 +2290,7 @@ export default function App() {
     }
 
     // Update enemies formation
-    const currentEnemyDiveSpeed = (ENEMY_DIVE_SPEED + waveRef.current * 0.2) * timeScale.current * dt;
+    const currentEnemyDiveSpeed = (ENEMY_DIVE_SPEED + waveRef.current * 0.2) * worldSpeedScale * dt;
     const formationOffset = (Math.sin(Date.now() / 1200) * 60);
     const currentTime = Date.now();
 
@@ -3181,10 +3185,12 @@ export default function App() {
       }
 
       // Keep spawning enemies if they are low
-      const maxEnemies = isAsteroidBelt ? 6 : 8;
+      const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : 8;
       if (enemies.current.filter(e => e.alive).length < maxEnemies && !isWarping.current) {
         const x = 40 + Math.random() * (CANVAS_WIDTH - 80);
-        const eliteChance = Math.min(0.3, 0.12 + (waveRef.current * 0.015));
+        const eliteChance = isAsteroidBelt
+          ? Math.min(0.18, 0.08 + (waveRef.current * 0.01))
+          : Math.min(0.3, 0.12 + (waveRef.current * 0.015));
         const isElite = Math.random() < eliteChance;
         const e: Enemy = {
           ...createEnemy(x, -50, isElite ? 3 : 0),
