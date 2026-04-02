@@ -1445,18 +1445,42 @@ export default function App() {
         for (let i = 0; i < vertexCount; i++) {
           vertices.push(0.8 + Math.random() * 0.4);
         }
-        asteroids.current.push({
-          x: Math.random() * CANVAS_WIDTH,
-          y: -100,
-          vx: 0,
-          vy: 0,
-          size,
-          speed: 2 + Math.random() * 3,
-          rotation: Math.random() * Math.PI * 2,
-          vr: (Math.random() - 0.5) * 0.05,
-          hp: Math.floor(size / 10),
-          vertices
-        });
+        const baseSpeed = 2 + Math.random() * 3;
+        let spawnX: number, spawnY: number, spawnDx: number, spawnSpeed: number;
+        if (isAsteroidBelt) {
+          const edge = Math.floor(Math.random() * 3); // 0=top, 1=left, 2=right
+          if (edge === 1) {
+            spawnX = -100; spawnY = Math.random() * CANVAS_HEIGHT;
+            spawnDx = baseSpeed; spawnSpeed = (Math.random() - 0.5) * 2;
+          } else if (edge === 2) {
+            spawnX = CANVAS_WIDTH + 100; spawnY = Math.random() * CANVAS_HEIGHT;
+            spawnDx = -baseSpeed; spawnSpeed = (Math.random() - 0.5) * 2;
+          } else {
+            spawnX = Math.random() * CANVAS_WIDTH; spawnY = -100;
+            spawnDx = (Math.random() - 0.5) * 3; spawnSpeed = baseSpeed;
+          }
+        } else {
+          spawnX = Math.random() * CANVAS_WIDTH; spawnY = -100;
+          spawnDx = 0; spawnSpeed = baseSpeed;
+        }
+        const pcx = playerPos.current.x + PLAYER_WIDTH / 2;
+        const pcy = playerPos.current.y + PLAYER_HEIGHT / 2;
+        const spawnDist = Math.sqrt((spawnX - pcx) ** 2 + (spawnY - pcy) ** 2);
+        if (spawnDist >= 200) {
+          asteroids.current.push({
+            x: spawnX,
+            y: spawnY,
+            dx: spawnDx,
+            vx: 0,
+            vy: 0,
+            size,
+            speed: spawnSpeed,
+            rotation: Math.random() * Math.PI * 2,
+            vr: (Math.random() - 0.5) * 0.05,
+            hp: Math.floor(size / 10),
+            vertices
+          });
+        }
       }
     }
 
@@ -1845,7 +1869,7 @@ export default function App() {
 
     asteroids.current.forEach(a => {
       // Movement with inertia
-      a.x += a.vx * timeScale.current * dt;
+      a.x += (a.dx + a.vx) * timeScale.current * dt;
       a.y += (a.speed + a.vy) * timeScale.current * dt;
       a.rotation += a.vr * timeScale.current * dt;
 
@@ -1964,6 +1988,7 @@ export default function App() {
                 asteroids.current.push({
                   x: a.x + Math.cos(angle) * (a.size / 2),
                   y: a.y + Math.sin(angle) * (a.size / 2),
+                  dx: 0,
                   vx: Math.cos(angle) * 5,
                   vy: Math.sin(angle) * 5,
                   size: fragSize,
@@ -1994,7 +2019,7 @@ export default function App() {
         }
       });
     });
-    asteroids.current = asteroids.current.filter(a => a.y < CANVAS_HEIGHT + 100 && a.hp > 0);
+    asteroids.current = asteroids.current.filter(a => a.hp > 0 && a.y < CANVAS_HEIGHT + 200 && a.y > -200 && a.x > -200 && a.x < CANVAS_WIDTH + 200);
 
     // Update Obstacles (Sector 16+: Fortress Gates & The Core)
     if (currentStage === 5 && !isWarping.current) {

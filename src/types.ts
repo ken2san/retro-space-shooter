@@ -103,6 +103,7 @@ export interface Scrap {
 export interface Asteroid {
   x: number;
   y: number;
+  dx: number;
   vx: number;
   vy: number;
   size: number;
