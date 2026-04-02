@@ -44,6 +44,9 @@ const VFX_PARTICLE_MOBILE_MULTIPLIER = 0.18;
 const VFX_TRAIL_SPAWN_INTERVAL_MS = 20;
 const VFX_TRAIL_ALPHA = 0.32;
 const VFX_SLINGSHOT_TRAIL_ALPHA = 0.42;
+const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
+const SLINGSHOT_GUARD_SMALL_MS = 280;
+const SLINGSHOT_GUARD_LARGE_MS = 450;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -162,6 +165,8 @@ export default function App() {
   // Idle-fire: fire slingshot when mousemove stops (finger lifted on trackpad before OS sends mouseup)
   const idleFireTimer = useRef<number | null>(null);
   const slingshotAttackUntil = useRef(0);
+  const slingshotGuardUntil = useRef(0);
+  const slingshotGuardCooldownUntil = useRef(0);
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -499,6 +504,8 @@ export default function App() {
     lastPointerTapTime.current = 0;
     inputVel.current = { x: 0, y: 0 };
     inputHistory.current = [];
+    slingshotGuardUntil.current = 0;
+    slingshotGuardCooldownUntil.current = 0;
   };
 
   const startNextWave = () => {
@@ -730,6 +737,8 @@ export default function App() {
     tailSegments.current = [];
     followerHistory.current = [];
     invulnerableUntil.current = 0;
+    slingshotGuardUntil.current = 0;
+    slingshotGuardCooldownUntil.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     targetPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     bullets.current = [];
@@ -979,6 +988,12 @@ export default function App() {
       // Flick Detection
       const inputSpeed = Math.sqrt(inputVel.current.x ** 2 + inputVel.current.y ** 2);
       const isFlick = inputSpeed > 400;
+      const tryActivateSlingshotGuard = (durationMs: number) => {
+        const now = Date.now();
+        if (now < slingshotGuardCooldownUntil.current) return;
+        slingshotGuardUntil.current = Math.max(slingshotGuardUntil.current, now + durationMs);
+        slingshotGuardCooldownUntil.current = now + SLINGSHOT_GUARD_COOLDOWN_MS;
+      };
 
       // 1. DEADZONE / ADJUSTMENT MODE (Small pull)
       if (dist < SLINGSHOT_THRESHOLD + 30) {
@@ -996,6 +1011,7 @@ export default function App() {
             shake.current = Math.max(shake.current, 2);
             audio.playSlingshot?.();
             isSnapping.current = 8;
+            tryActivateSlingshotGuard(SLINGSHOT_GUARD_SMALL_MS);
           }
         } else {
           if (isFlick && dist > 20) {
@@ -1008,12 +1024,14 @@ export default function App() {
             shake.current = Math.max(shake.current, 2);
             audio.playSlingshot?.();
             isSnapping.current = 15;
+            tryActivateSlingshotGuard(SLINGSHOT_GUARD_SMALL_MS);
           } else if (dist > 50) {
             const speed = 15 + (dist / SLINGSHOT_THRESHOLD) * 25;
             playerVel.current.x = dirX * speed;
             playerVel.current.y = dirY * speed;
             audio.playSlingshot?.();
             isSnapping.current = 10;
+            tryActivateSlingshotGuard(SLINGSHOT_GUARD_SMALL_MS);
           }
         }
       }
@@ -1046,6 +1064,7 @@ export default function App() {
         const attackDuration = 500 + (totalPower * 700);
         slingshotAttackUntil.current = Date.now() + attackDuration;
         invulnerableUntil.current = Date.now() + (attackDuration * 0.7);
+        tryActivateSlingshotGuard(SLINGSHOT_GUARD_LARGE_MS);
 
         shake.current = Math.max(shake.current, 6 + totalPower * 15);
 
@@ -3022,6 +3041,7 @@ export default function App() {
     }
 
     const eBullets = enemyBullets.current;
+    const isSlingshotGuardActive = Date.now() < slingshotGuardUntil.current;
     for (let i = eBullets.length - 1; i >= 0; i--) {
       const bullet = eBullets[i];
       // Graze Detection for bullets
@@ -3035,6 +3055,13 @@ export default function App() {
 
       if (bullet.x > px && bullet.x < px + pw &&
           bullet.y > py && bullet.y < py + ph) {
+        if (isSlingshotGuardActive) {
+          createExplosion(bullet.x, bullet.y, '#00ffcc', 6);
+          overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
+          setOverdrive(overdriveGauge.current);
+          eBullets.splice(i, 1);
+          continue;
+        }
         playerHit = true;
         eBullets.splice(i, 1);
       }
