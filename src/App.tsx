@@ -985,8 +985,8 @@ export default function App() {
         if (isMobile) {
           if (dist > 20) {
             const pullRatio = Math.min(dist / (SLINGSHOT_THRESHOLD + 30), 1);
-            const baseSpeed = 7 + pullRatio * 11;
-            const flickBoost = isFlick ? Math.min((inputSpeed - 400) / 1600, 0.35) : 0;
+            const baseSpeed = 8 + pullRatio * 12;
+            const flickBoost = isFlick ? Math.min((inputSpeed - 400) / 1600, 0.4) : 0;
             const speed = baseSpeed * (1 + flickBoost);
             // Keep launch direction tied to slingshot direction; flick only boosts speed.
             playerVel.current.x = dirX * speed;
@@ -1023,9 +1023,9 @@ export default function App() {
         const tensionRatio = Math.min(attackDist / 350, 3.5);
         const totalPower = Math.pow(tensionRatio, 1.7);
 
-        const baseSnapSpeed = isMobile ? 13 : 45;
+        const baseSnapSpeed = isMobile ? 14 : 45;
         const speed = isMobile
-          ? Math.min(42, baseSnapSpeed + (totalPower * 22))
+          ? Math.min(46, baseSnapSpeed + (totalPower * 24))
           : baseSnapSpeed + (totalPower * 85);
 
         // Combine with flick if in similar direction
