@@ -985,8 +985,11 @@ export default function App() {
         if (isFlick && dist > 20) {
           const flickPower = Math.min(inputSpeed / 1000, 2.0);
           const speed = 25 + flickPower * 40;
-          playerVel.current.x = (inputVel.current.x / inputSpeed) * speed;
-          playerVel.current.y = (inputVel.current.y / inputSpeed) * speed;
+          // Always fire in slingshot direction (dirX/Y), not inputVel direction.
+          // inputVel may retain drag-direction velocity from smoothing, which would
+          // send the ship the wrong way and cause a visible bounce-back on mobile.
+          playerVel.current.x = dirX * speed;
+          playerVel.current.y = dirY * speed;
 
           createExplosion(centerX, centerY, '#00ffcc', isMobile ? 3 : 6);
           shake.current = Math.max(shake.current, 2);
@@ -1547,11 +1550,18 @@ export default function App() {
 
     // --- Player Movement Logic (Simplified) ---
 
+    const isDragging = isMouseDown.current || isTouching.current;
+
     // 1. DAMPING & FRICTION (Only for Slingshot Snap)
     if (isSnapping.current > 0) {
       playerVel.current.x *= 0.98;
       playerVel.current.y *= 0.98;
       isSnapping.current--;
+      // When snapping ends and no finger is down, sync targetPos to current position
+      // so the precision lerp doesn't pull the ship back toward the fire-time target.
+      if (isSnapping.current === 0 && !isDragging) {
+        targetPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+      }
     } else {
       // Very high friction for precision mode to feel responsive
       playerVel.current.x *= 0.85;
@@ -1559,7 +1569,6 @@ export default function App() {
     }
 
     // 2. TARGET FOLLOWING (Precision Mode)
-    const isDragging = isMouseDown.current || isTouching.current;
     if (!isSlingshotMode.current && isSnapping.current <= 0) {
       // Smoothed follow in precision mode to feel more physical and less "teleporty"
       // Guard: skip while isSnapping so slingshot velocity isn't zeroed immediately after firing.
