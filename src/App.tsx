@@ -21,6 +21,7 @@ import {
 import NeonShip from './components/NeonShip';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
 import { bindInputListeners } from './hooks/useInput';
+import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRandomOptions } from './game/upgrades';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,7 +42,7 @@ export default function App() {
   const xpToNextLevelRef = useRef(200);
 
   const [showUpgrade, setShowUpgrade] = useState(false);
-  const [upgradeOptions, setUpgradeOptions] = useState<{id: string, label: string, desc: string}[]>([]);
+  const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
   const [isTouchDevice, setIsTouchDevice] = useState(false);
   const [hasWingman, setHasWingman] = useState(false);
@@ -423,16 +424,7 @@ export default function App() {
   };
 
   const triggerLevelUp = () => {
-    const allOptions = [
-      { id: 'FIREPOWER', label: 'Plasma Overclock', desc: 'Increase bullet damage and size.' },
-      { id: 'SPEED', label: 'Engine Boost', desc: 'Increase movement speed and agility.' },
-      { id: 'MAGNET', label: 'Scrap Magnet', desc: 'Increase scrap collection range.' },
-      { id: 'CRIT', label: 'Critical Core', desc: '10% chance for double damage.' },
-    ];
-
-    // Pick 3 random
-    const shuffled = [...allOptions].sort(() => 0.5 - Math.random());
-    setUpgradeOptions(shuffled.slice(0, 3));
+    setUpgradeOptions(pickRandomOptions(LEVEL_UP_OPTIONS, 3));
     setShowUpgrade(true);
     setGameState('UPGRADE');
     pauseStartTime.current = Date.now();
@@ -507,21 +499,8 @@ export default function App() {
   };
 
   const triggerRelicSelection = () => {
-    const allRelics = [
-      { id: 'CHAIN', label: 'Tesla Arc', desc: 'Bullets jump between nearby enemies.' },
-      { id: 'DRONE', label: 'Tactical Drone', desc: 'Deploy an orbiting support drone.' },
-      { id: 'REGEN', label: 'Nano-Repair', desc: 'Slowly regenerate hull integrity.' },
-      { id: 'SHIELD_REGEN', label: 'Aegis Protocol', desc: 'Absorbs one hit; recharges every 20s.' },
-      { id: 'WINGMAN', label: 'Wingman Support', desc: 'Summon a combat support ship.' },
-      { id: 'FRENZY', label: 'Overdrive Sync', desc: 'Overdrive lasts 50% longer.' },
-      { id: 'CHRONO', label: 'Chrono-Trigger', desc: 'Chance to slow time on enemy kill.' },
-      { id: 'EMP', label: 'EMP Burst', desc: 'Chance to stun enemies on hit.' },
-      { id: 'FOLLOWER', label: 'Energy Follower', desc: 'Deploy a chain of defensive energy pods.' },
-    ];
-
     // Pick 4 random (increased choice since it's rarer)
-    const shuffled = [...allRelics].sort(() => 0.5 - Math.random());
-    setUpgradeOptions(shuffled.slice(0, 4));
+    setUpgradeOptions(pickRandomOptions(RELIC_OPTIONS, 4));
     setShowUpgrade(true);
     setGameState('RELIC_SELECT');
     pauseStartTime.current = Date.now();
@@ -529,21 +508,8 @@ export default function App() {
   };
 
   const handleUpgrade = (id: string) => {
-    // Track if it's a relic to add to inventory
-    const relicLabels: Record<string, string> = {
-      'CHAIN': 'Tesla Arc',
-      'DRONE': 'Tactical Drone',
-      'REGEN': 'Nano-Repair',
-      'SHIELD_REGEN': 'Aegis Protocol',
-      'WINGMAN': 'Wingman Support',
-      'FRENZY': 'Overdrive Sync',
-      'CHRONO': 'Chrono-Trigger',
-      'EMP': 'EMP Burst',
-      'FOLLOWER': 'Energy Follower'
-    };
-
-    if (relicLabels[id]) {
-      const newRelic = { id, label: relicLabels[id] };
+    if (RELIC_LABELS[id]) {
+      const newRelic = { id, label: RELIC_LABELS[id] };
       setRelics(prev => [...prev, newRelic]);
       relicsRef.current.push(newRelic);
     }
