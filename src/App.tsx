@@ -3319,8 +3319,8 @@ export default function App() {
         const angle = Math.atan2(dy, dx);
         const speed = (s.speed + warpFactor.current * 30);
 
-        s.x += Math.cos(angle) * speed;
-        s.y += Math.sin(angle) * speed;
+        s.x += Math.cos(angle) * speed * dtRef.current;
+        s.y += Math.sin(angle) * speed * dtRef.current;
 
         // Reset stars that go offscreen
         if (s.x < -100 || s.x > CANVAS_WIDTH + 100 || s.y < -100 || s.y > CANVAS_HEIGHT + 100) {
@@ -3339,7 +3339,7 @@ export default function App() {
       } else {
         // Normal vertical movement
         const speedMult = (isChase ? 3 : 1);
-        s.y += s.speed * speedMult;
+        s.y += s.speed * speedMult * dtRef.current;
         if (s.y > CANVAS_HEIGHT) {
           s.y = -10;
           s.x = Math.random() * CANVAS_WIDTH;
