@@ -42,6 +42,8 @@ interface Bullet {
   vy?: number;
   damage?: number;
   size?: number;
+  color?: string;
+  isHoming?: boolean;
 }
 
 interface Enemy {
@@ -57,7 +59,7 @@ interface Enemy {
   diveY: number;
   originX: number;
   originY: number;
-  diveType?: 'normal' | 'uturn' | 'zigzag' | 'sweep' | 'spread' | 'loop' | 'chase';
+  diveType?: 'normal' | 'uturn' | 'zigzag' | 'sweep' | 'spread' | 'loop' | 'chase' | 'sine';
   turnY?: number;
   diveTime?: number;
   diveStartX?: number;
@@ -107,6 +109,7 @@ interface Particle {
   type?: 'square' | 'line';
   rotation?: number;
   vr?: number;
+  isWarp?: boolean;
 }
 
 interface Trail {
@@ -199,10 +202,11 @@ interface Obstacle {
 interface DamageNumber {
   x: number;
   y: number;
-  value: string;
+  value: number;
   life: number;
   maxLife: number;
   color: string;
+  isCrit?: boolean;
 }
 
 interface TailSegment {
@@ -1422,13 +1426,7 @@ export default function App() {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (rect) {
         const now = Date.now();
-        // Also check lastPointerTapTime: records pointerdowns where macOS ate the mousedown.
-        // This catches the first tap of a 3-finger double-tap where only pointerdown fired.
-        const isDoubleClick = (now - lastMouseTapTime.current < 700) || (now - lastPointerTapTime.current < 700) || (e.detail >= 2);
         const isRightClick = e.button === 2 || (e.button === 0 && e.ctrlKey);
-        lastMouseTapTime.current = now;
-        // Cancel any pending orphaned-pointerdown record for this same click
-        if (pointerTapTimer.current !== null) { window.clearTimeout(pointerTapTimer.current); pointerTapTimer.current = null; }
 
         // If already dragging and right-click/ctrl-click, force slingshot mode
         if (isMouseDown.current && isRightClick) {
@@ -1464,7 +1462,7 @@ export default function App() {
           createExplosion(x, y, '#00ffcc', 20);
           timeScale.current = 0.2;
           setTimeout(() => { timeScale.current = 1.0; }, 100);
-        } else if (isDoubleClick || isRightClick) {
+        } else if (isRightClick) {
           isSlingshotMode.current = true;
           mouseAnchorPos.current = { x, y };
           audio.playSlingshot?.();
@@ -1612,20 +1610,6 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown, { passive: false });
     window.addEventListener('keyup', handleKeyUp, { passive: false });
     window.addEventListener('mousedown', handleMouseDown);
-    // pointerdown sometimes fires when macOS consumes the mousedown for a gesture.
-    // We record it ONLY if mousedown does NOT follow within 50ms (= the mousedown was eaten).
-    // That orphaned timestamp is then usable as the "first tap" for double-tap detection.
-    const handlePointerDownTiming = (e: PointerEvent) => {
-      if (e.pointerType !== 'mouse') return;
-      const t = Date.now();
-      if (pointerTapTimer.current !== null) window.clearTimeout(pointerTapTimer.current);
-      pointerTapTimer.current = window.setTimeout(() => {
-        // mousedown did NOT cancel this timer → mousedown was eaten → count as a tap
-        lastPointerTapTime.current = t;
-        pointerTapTimer.current = null;
-      }, 50);
-    };
-    window.addEventListener('pointerdown', handlePointerDownTiming);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('pointerup', handleMouseUp);
@@ -1640,7 +1624,6 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('pointerdown', handlePointerDownTiming);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('pointerup', handleMouseUp);
@@ -3075,6 +3058,7 @@ export default function App() {
             y: enemy.y,
             value: damage,
             life: 30,
+            maxLife: 30,
             color: isCrit ? '#ffcc00' : '#ffffff',
             isCrit
           });
@@ -3341,6 +3325,8 @@ export default function App() {
           isMouseDown.current = false; // Force release
           mouseAnchorPos.current = null;
           isTouching.current = false;
+          isSlingshotMode.current = false;
+          isSlingshotCharged.current = false;
         }
         return;
       }
@@ -3361,6 +3347,8 @@ export default function App() {
         isMouseDown.current = false;
         mouseAnchorPos.current = null;
         isTouching.current = false;
+        isSlingshotMode.current = false;
+        isSlingshotCharged.current = false;
       }
 
       // Spawn player explosion particles
