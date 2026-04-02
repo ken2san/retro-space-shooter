@@ -34,6 +34,16 @@ const getPercentile = (values: number[], percentile: number): number => {
   const index = Math.min(sorted.length - 1, Math.max(0, rank));
   return sorted[index];
 };
+const TOUCH_DOUBLE_TAP_WINDOW_MS = 460;
+const TOUCH_SLINGSHOT_CHARGE_DEADZONE = 18;
+const TOUCH_SLINGSHOT_RESISTANCE = 0.3;
+const TOUCH_INPUT_VELOCITY_SMOOTHING = 0.55;
+
+const VFX_PARTICLE_DESKTOP_MULTIPLIER = 0.75;
+const VFX_PARTICLE_MOBILE_MULTIPLIER = 0.18;
+const VFX_TRAIL_SPAWN_INTERVAL_MS = 20;
+const VFX_TRAIL_ALPHA = 0.32;
+const VFX_SLINGSHOT_TRAIL_ALPHA = 0.42;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -357,7 +367,9 @@ export default function App() {
 
   const createExplosion = (x: number, y: number, color: string, count: number) => {
     if (particles.current.length > MAX_PARTICLES) return;
-    const finalCount = isMobile ? Math.ceil(count * 0.2) : count;
+    const finalCount = isMobile
+      ? Math.ceil(count * VFX_PARTICLE_MOBILE_MULTIPLIER)
+      : Math.ceil(count * VFX_PARTICLE_DESKTOP_MULTIPLIER);
     for (let i = 0; i < finalCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = Math.random() * 10;
@@ -775,7 +787,7 @@ export default function App() {
       e.preventDefault();
 
       const now = Date.now();
-      const isDoubleTap = now - lastTapTime.current < 550;
+      const isDoubleTap = now - lastTapTime.current < TOUCH_DOUBLE_TAP_WINDOW_MS;
       lastTapTime.current = now;
       const isArmed = slingshotArmed.current && now < slingshotArmedExpiry.current;
 
@@ -876,8 +888,10 @@ export default function App() {
           const last = inputHistory.current[inputHistory.current.length - 1];
           const dt = (last.t - first.t) / 1000;
           if (dt > 0) {
-            inputVel.current.x = (last.x - first.x) / dt;
-            inputVel.current.y = (last.y - first.y) / dt;
+            const nextVelocityX = (last.x - first.x) / dt;
+            const nextVelocityY = (last.y - first.y) / dt;
+            inputVel.current.x = (inputVel.current.x * TOUCH_INPUT_VELOCITY_SMOOTHING) + (nextVelocityX * (1 - TOUCH_INPUT_VELOCITY_SMOOTHING));
+            inputVel.current.y = (inputVel.current.y * TOUCH_INPUT_VELOCITY_SMOOTHING) + (nextVelocityY * (1 - TOUCH_INPUT_VELOCITY_SMOOTHING));
           }
         }
 
@@ -889,12 +903,12 @@ export default function App() {
           const rawDy = (y - mouseAnchorPos.current.y);
           const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
 
-          if (dist > 22) { // Lower deadzone to improve trackpad gesture recognition
+          if (dist > TOUCH_SLINGSHOT_CHARGE_DEADZONE) {
             isSlingshotCharged.current = true;
           }
 
           // Apply resistance
-          const resistance = 0.25;
+          const resistance = TOUCH_SLINGSHOT_RESISTANCE;
           const finalDx = rawDx * resistance;
           const finalDy = rawDy * resistance;
 
@@ -1041,7 +1055,7 @@ export default function App() {
           }
         });
 
-        const trailCount = Math.floor(isMobile ? 2 : 5 + totalPower * 7);
+        const trailCount = Math.floor(isMobile ? 2 : 4 + totalPower * 5);
         for (let i = 0; i < trailCount; i++) {
           setTimeout(() => {
             createExplosion(playerPos.current.x + PLAYER_WIDTH/2, playerPos.current.y + PLAYER_HEIGHT/2, '#00ffcc', isMobile ? 4 : 15);
@@ -1647,7 +1661,7 @@ export default function App() {
 
     // Add trail
     const now = Date.now();
-    if (isMoving && now - lastTrailSpawnAt.current > 16 && trails.current.length < MAX_TRAILS) {
+    if (isMoving && now - lastTrailSpawnAt.current > VFX_TRAIL_SPAWN_INTERVAL_MS && trails.current.length < MAX_TRAILS) {
       lastTrailSpawnAt.current = now;
       trails.current.push({
         x: playerPos.current.x + PLAYER_WIDTH / 2,
@@ -3395,7 +3409,7 @@ export default function App() {
 
     // Draw Trails
     trails.current.forEach(t => {
-      ctx.globalAlpha = (t.life / t.maxLife) * 0.4;
+      ctx.globalAlpha = (t.life / t.maxLife) * VFX_TRAIL_ALPHA;
       ctx.fillStyle = t.color;
       ctx.beginPath();
       ctx.arc(t.x, t.y, (t.width / 2) * (t.life / t.maxLife), 0, Math.PI * 2);
@@ -3707,7 +3721,7 @@ export default function App() {
     // Slingshot Trails Rendering
     slingshotTrails.current.forEach(t => {
       ctx.save();
-      ctx.globalAlpha = t.alpha * 0.5;
+      ctx.globalAlpha = t.alpha * VFX_SLINGSHOT_TRAIL_ALPHA;
       ctx.fillStyle = '#ffffff';
       ctx.shadowBlur = 15;
       ctx.shadowColor = '#00ffcc';

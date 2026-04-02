@@ -121,6 +121,18 @@ Raise the quality bar on performance, mobile UX, and audio.
     - Particle movement confirmed dt-consistent in all paths
 - In Progress
   - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values (manual action required)
+- Completed
+  - P4-2: Mobile touch control refinement
+    - Tuned touch double-tap window to reduce accidental slingshot activation
+    - Reduced touch slingshot deadzone and adjusted resistance for more responsive drag feel
+    - Smoothed touch input velocity sampling to stabilize flick detection
+  - P4-3: Sound design review (BGM/SFX balance)
+    - Rebalanced master level and reduced peak-heavy SFX levels (slingshot, overdrive, player hit, explosion)
+    - Slightly reduced kick/sub dominance in BGM to improve gameplay cue clarity
+  - P4-4: Visual effects tuning (particles, trails)
+    - Reduced explosion particle density on desktop/mobile
+    - Reduced slingshot burst trail count and softened trail alpha intensity
+    - Increased movement trail spawn interval to lower visual clutter
 
 #### P4-1 Capture Log Template
 
@@ -139,9 +151,8 @@ Execution steps:
 | YYYY-MM-DD | <commit>     | Stage X / Wave Y / input pattern Z | -       | -       | -            | -            | -       | -       | -             | -         | baseline |
 
 - Next (execute in order)
-  - P4-2: Mobile touch control refinement
-  - P4-3: Sound design review (BGM/SFX balance)
-  - P4-4: Visual effects tuning (particle density, trail length)
+  - Finalize P4-1 baseline capture table with 3 manual runs and median values
+  - Compare current build against baseline and accept/reject each polish unit under Phase 4 Exit Criteria
 
 ### Phase 4 Exit Criteria
 

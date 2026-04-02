@@ -12,7 +12,7 @@ class RetroAudio {
       
       // Master chain
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.8;
+      this.masterGain.gain.value = 0.72;
       
       this.compressor = this.ctx.createDynamicsCompressor();
       this.compressor.threshold.setValueAtTime(-24, this.ctx.currentTime);
@@ -166,7 +166,7 @@ class RetroAudio {
     filter.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + duration);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.38, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
 
     noise.connect(filter);
@@ -181,7 +181,7 @@ class RetroAudio {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(100, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.3);
-    oscGain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+    oscGain.gain.setValueAtTime(0.45, this.ctx.currentTime);
     oscGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
     osc.connect(oscGain);
     oscGain.connect(this.masterGain);
@@ -218,7 +218,7 @@ class RetroAudio {
     osc.frequency.setValueAtTime(110, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.5);
     
-    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.22, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
     
     osc.connect(gain);
@@ -238,7 +238,7 @@ class RetroAudio {
     osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.15);
     
-    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
     
     osc.connect(gain);
@@ -406,7 +406,7 @@ class RetroAudio {
     filter.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + duration);
     
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.42, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
     
     const panner = this.createPanner(x);
@@ -428,7 +428,7 @@ class RetroAudio {
     boom.type = 'sine';
     boom.frequency.setValueAtTime(80, this.ctx.currentTime);
     boom.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.5);
-    boomGain.gain.setValueAtTime(0.8, this.ctx.currentTime);
+    boomGain.gain.setValueAtTime(0.58, this.ctx.currentTime);
     boomGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
     boom.connect(boomGain);
     boomGain.connect(this.masterGain);
@@ -620,7 +620,7 @@ class RetroAudio {
         kickOsc.type = 'sine';
         kickOsc.frequency.setValueAtTime(150, this.ctx.currentTime);
         kickOsc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.1);
-        kickGain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+        kickGain.gain.setValueAtTime(0.34, this.ctx.currentTime);
         kickGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
         kickOsc.connect(kickGain);
         kickGain.connect(globalFilter);
@@ -633,7 +633,7 @@ class RetroAudio {
         subOsc.type = 'sine';
         subOsc.frequency.setValueAtTime(60, this.ctx.currentTime);
         subOsc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.2);
-        subGain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        subGain.gain.setValueAtTime(0.24, this.ctx.currentTime);
         subGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
         subOsc.connect(subGain);
         subGain.connect(this.masterGain);
