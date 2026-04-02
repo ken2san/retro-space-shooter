@@ -120,11 +120,31 @@ Raise the quality bar on performance, mobile UX, and audio.
     - Star warp/scroll movement now multiplies by `dtRef.current`
     - Particle movement confirmed dt-consistent in all paths
 - In Progress
-  - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values (manual action required)
+- Completed
+  - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values
+  - P4-2: Mobile touch control refinement
+    - Tuned touch double-tap window to reduce accidental slingshot activation
+    - Reduced touch slingshot deadzone and adjusted resistance for more responsive drag feel
+    - Smoothed touch input velocity sampling to stabilize flick detection
+  - P4-3: Sound design review (BGM/SFX balance)
+    - Rebalanced master level and reduced peak-heavy SFX levels (slingshot, overdrive, player hit, explosion)
+    - Slightly reduced kick/sub dominance in BGM to improve gameplay cue clarity
+  - P4-4: Visual effects tuning (particles, trails)
+    - Reduced explosion particle density on desktop/mobile
+    - Reduced slingshot burst trail count and softened trail alpha intensity
+    - Increased movement trail spawn interval to lower visual clutter
 
 #### P4-1 Capture Log Template
 
 Use one row per 60s run in the fixed scenario.
+
+Fixed scenario (for all runs):
+
+- Start from a fresh `New Game` state
+- Capture window: first 60s from gameplay start
+- Input pattern: standard movement + primary fire only (no overdrive trigger, no intentional slingshot burst)
+- Device: same machine/browser/tab state for all runs
+- Quality settings: unchanged between runs
 
 Execution steps:
 
@@ -134,14 +154,15 @@ Execution steps:
 4. Record one row in the table below.
 5. Repeat at least 3 runs and use median values as the baseline reference.
 
-| Run Date   | Build/Commit | Scenario                           | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes    |
-| ---------- | ------------ | ---------------------------------- | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | -------- |
-| YYYY-MM-DD | <commit>     | Stage X / Wave Y / input pattern Z | -       | -       | -            | -            | -       | -       | -             | -         | baseline |
+| Run Date   | Build/Commit | Scenario                             | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes              |
+| ---------- | ------------ | ------------------------------------ | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | ------------------ |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | 125.0   | 125.0   | 8.00         | 9.00         | 5       | 3       | 20            | 0         | run-1              |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | 125.0   | 142.9   | 8.00         | 9.00         | 3       | 32      | 15            | 24        | run-2              |
+| 2026-04-02 | de21773      | New Game / first 60s / std move+fire | 125.0   | 125.0   | 8.00         | 9.00         | 6       | 3       | 6             | 15        | run-3              |
+| 2026-04-02 | de21773      | Median (run-1..run-3)                | 125.0   | 125.0   | 8.00         | 9.00         | 5       | 3       | 15            | 15        | baseline reference |
 
 - Next (execute in order)
-  - P4-2: Mobile touch control refinement
-  - P4-3: Sound design review (BGM/SFX balance)
-  - P4-4: Visual effects tuning (particle density, trail length)
+  - Compare current build against baseline and accept/reject each polish unit under Phase 4 Exit Criteria
 
 ### Phase 4 Exit Criteria
 
