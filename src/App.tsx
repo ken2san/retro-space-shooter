@@ -22,6 +22,7 @@ import NeonShip from './components/NeonShip';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
 import { bindInputListeners } from './hooks/useInput';
 import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRandomOptions } from './game/upgrades';
+import { getStageFromWave, getStageLabelFromWave, getSurvivalDurationFromStage } from './game/stage';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -326,14 +327,6 @@ export default function App() {
     loadAssets();
   }, []);
 
-  const getSectorName = (w: number) => {
-    if (w <= 5) return "Outer Rim";
-    if (w <= 10) return "Asteroid Belt";
-    if (w <= 15) return "Nebula Pass";
-    if (w <= 20) return "Fortress Gates";
-    return "The Core";
-  };
-
   const createExplosion = (x: number, y: number, color: string, count: number) => {
     if (particles.current.length > MAX_PARTICLES) return;
     const finalCount = isMobile ? Math.ceil(count * 0.2) : count;
@@ -475,16 +468,14 @@ export default function App() {
     waveRef.current += 1;
     setWave(waveRef.current);
 
-    const stage = Math.min(5, Math.ceil(waveRef.current / 2));
-    const sector = ((waveRef.current - 1) % 2) + 1;
-    const stageNames = ["Tutorial", "Asteroid Belt", "Heavy Fire", "Chase", "Final Front"];
-    setSectorName(`${stageNames[stage - 1]} - SECTOR ${sector}`);
+    const stage = getStageFromWave(waveRef.current);
+    setSectorName(getStageLabelFromWave(waveRef.current));
 
     initEnemies(waveRef.current);
 
     stageStartTime.current = 0;
     survivalTimerRef.current = 30;
-    setSurvivalTime(stage === 2 ? 45 : 30);
+    setSurvivalTime(getSurvivalDurationFromStage(stage));
     blocks.current = [];
 
     setWaveTitle(true);
@@ -560,7 +551,7 @@ export default function App() {
   };
 
   const generateMazeRow = () => {
-    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const currentStage = getStageFromWave(waveRef.current);
     // Introduce maze blocks earlier (Stage 2) but keep it sparse initially
     if (currentStage < 2) return;
 
@@ -664,7 +655,7 @@ export default function App() {
     resetInputGestureState();
     setScore(0);
     setWave(1);
-    setSectorName('Tutorial - SECTOR 1');
+    setSectorName(getStageLabelFromWave(1));
     setScrapCount(0);
     setLevel(1);
     setXp(0);
@@ -1335,7 +1326,7 @@ export default function App() {
     if (flash.current > 0) flash.current -= 0.04 * dt;
     if (flash.current < 0) flash.current = 0;
 
-    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const currentStage = getStageFromWave(waveRef.current);
 
     // Update trippy intensity
     const isBossActive = enemies.current.some(e => e.isBoss && e.alive);
@@ -3278,7 +3269,7 @@ export default function App() {
     }
 
     // Parallax Starfield
-    const currentStage = Math.min(5, Math.ceil(waveRef.current / 2));
+    const currentStage = getStageFromWave(waveRef.current);
     const isChase = currentStage === 4;
     stars.current.forEach(s => {
       if (warpFactor.current > 0.1) {
