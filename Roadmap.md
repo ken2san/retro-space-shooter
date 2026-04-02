@@ -116,9 +116,64 @@ Raise the quality bar on performance, mobile UX, and audio.
     - Path-follow entry movement now dt-scaled
     - Boss lateral movement now dt-scaled
     - Tractor beam timer and laser rotation timer use dt-based ms instead of 16ms
-- Next
-  - Run 60s baseline captures per fixed scenario and compare perf overlay values
-  - Audit remaining hotspots: star/particle movement, formation float, asteroid drift
+  - Star movement and particle movement audit
+    - Star warp/scroll movement now multiplies by `dtRef.current`
+    - Particle movement confirmed dt-consistent in all paths
+- In Progress
+  - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values (manual action required)
+
+#### P4-1 Capture Log Template
+
+Use one row per 60s run in the fixed scenario.
+
+| Run Date | Build/Commit | Scenario | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| YYYY-MM-DD | <commit> | Stage X / Wave Y / input pattern Z | - | - | - | - | - | - | - | - | baseline |
+- Next (execute in order)
+  - P4-2: Mobile touch control refinement
+  - P4-3: Sound design review (BGM/SFX balance)
+  - P4-4: Visual effects tuning (particle density, trail length)
+
+### Phase 4 Exit Criteria
+
+- Gameplay readability and control feel do not regress
+- p95 frame time does not regress against fixed baseline scenario
+- Lint and tests pass after each optimization unit
+
+### Design Expansion Lane (Post-Phase 4)
+
+Design expansion (new enemy or new stage variation) starts only after Phase 4 exit criteria are met.
+
+#### Scope Guard
+
+- Do not mix broad design changes with active polish tasks in the same implementation unit
+- Keep release-path behavior stable while experiments are evaluated
+
+#### Spike Protocol
+
+1. One spike = one theme only
+   - Example: one new enemy behavior OR one stage gimmick, not both
+2. Implement with a runtime feature flag
+   - Default OFF on mainline behavior until validated
+3. Validate in the same 60s fixed scenario
+   - Collect FPS/frame-time p50/p95 plus gameplay outcomes
+
+#### Adoption Gates
+
+- Fun/readability improves in playtest feedback
+- No fairness regression (damage spikes, unavoidable overlap windows)
+- No performance regression (p95 frame time)
+- Existing lint/tests pass
+
+#### Integration Order
+
+1. Low risk: add behavior variants to existing enemies
+2. Medium risk: introduce one new enemy type with low spawn rate
+3. High risk: add stage-structure variation last
+
+#### Rollback Rule
+
+- If any gate fails, keep feature flag OFF and return to redesign
 
 ---
 
