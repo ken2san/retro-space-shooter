@@ -1436,8 +1436,9 @@ export default function App() {
 
     // Spawn Asteroids
     if ((isAsteroidBelt || isFinalFront) && !isWarping.current) {
-      const spawnRate = isAsteroidBelt ? (isMobile ? 0.008 : 0.02) : (isMobile ? 0.008 : 0.02);
-      if (Math.random() < spawnRate) {
+      const spawnRate = isAsteroidBelt ? (isMobile ? 0.006 : 0.014) : (isMobile ? 0.008 : 0.02);
+      const maxAsteroids = isAsteroidBelt ? (isMobile ? 8 : 12) : 999;
+      if (asteroids.current.length < maxAsteroids && Math.random() < spawnRate) {
         const size = 30 + Math.random() * 60;
         const vertexCount = isMobile ? 5 : 8;
         const vertices = [];
@@ -1950,7 +1951,9 @@ export default function App() {
 
             // Splitting Logic: If size is large enough, spawn smaller fragments
             if (a.size > 40) {
-              const numFragments = Math.floor(Math.random() * 2) + 2; // 2-3 fragments
+              const numFragments = isAsteroidBelt
+                ? (Math.random() < 0.6 ? 1 : 2) // Stage 2 fairness: fewer splits
+                : Math.floor(Math.random() * 2) + 2; // 2-3 fragments
               for(let i=0; i<numFragments; i++) {
                 const fragSize = a.size * 0.5;
                 const angle = (i / numFragments) * Math.PI * 2 + Math.random() * 0.5;
@@ -1964,7 +1967,7 @@ export default function App() {
                   vx: Math.cos(angle) * 5,
                   vy: Math.sin(angle) * 5,
                   size: fragSize,
-                  speed: a.speed * 1.2, // Fragments are faster
+                  speed: a.speed * (isAsteroidBelt ? 1.05 : 1.2), // Stage 2 fairness: softer fragment chase
                   rotation: Math.random() * Math.PI * 2,
                   vr: (Math.random() - 0.5) * 0.1,
                   hp: Math.floor(fragSize / 10),
