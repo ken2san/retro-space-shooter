@@ -138,6 +138,14 @@ Raise the quality bar on performance, mobile UX, and audio.
 
 Use one row per 60s run in the fixed scenario.
 
+Fixed scenario (for all runs):
+
+- Start from a fresh `New Game` state
+- Capture window: first 60s from gameplay start
+- Input pattern: standard movement + primary fire only (no overdrive trigger, no intentional slingshot burst)
+- Device: same machine/browser/tab state for all runs
+- Quality settings: unchanged between runs
+
 Execution steps:
 
 1. Launch the game with the current mainline build.
@@ -148,7 +156,10 @@ Execution steps:
 
 | Run Date   | Build/Commit | Scenario                           | FPS p50 | FPS p95 | Frame ms p50 | Frame ms p95 | Enemies | Bullets | Enemy Bullets | Particles | Notes    |
 | ---------- | ------------ | ---------------------------------- | ------- | ------- | ------------ | ------------ | ------- | ------- | ------------- | --------- | -------- |
-| YYYY-MM-DD | <commit>     | Stage X / Wave Y / input pattern Z | -       | -       | -            | -            | -       | -       | -             | -         | baseline |
+| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -     | -       | -            | -            | -       | -       | -             | -         | run-1 |
+| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -     | -       | -            | -            | -       | -       | -             | -         | run-2 |
+| YYYY-MM-DD | <commit>     | New Game / first 60s / std move+fire | -     | -       | -            | -            | -       | -       | -             | -         | run-3 |
+| YYYY-MM-DD | <commit>     | Median (run-1..run-3)             | -       | -       | -            | -            | -       | -       | -             | -         | baseline reference |
 
 - Next (execute in order)
   - Finalize P4-1 baseline capture table with 3 manual runs and median values
