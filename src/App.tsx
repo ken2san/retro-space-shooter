@@ -213,6 +213,7 @@ export default function App() {
   const [isWarpingState, setIsWarpingState] = useState(false);
   const [stageProgress, setStageProgress] = useState(0);
   const wavePeakAliveRef = useRef(1);
+  const waveHasBossRef = useRef(false);
   const lastProgressUiUpdateAt = useRef(0);
   const blocks = useRef<Obstacle[]>([]);
   const lastBlockRowY = useRef(0);
@@ -533,8 +534,9 @@ export default function App() {
     setSectorName(getStageLabelFromWave(waveRef.current));
 
     initEnemies(waveRef.current);
+    waveHasBossRef.current = enemies.current.some(e => e.alive && e.isBoss);
     wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
-    setStageProgress(0);
+    setStageProgress(waveHasBossRef.current ? 1 : 0);
 
     stageStartTime.current = 0;
     survivalTimerRef.current = 30;
@@ -768,8 +770,9 @@ export default function App() {
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
+    waveHasBossRef.current = enemies.current.some(e => e.alive && e.isBoss);
     wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
-    setStageProgress(0);
+    setStageProgress(waveHasBossRef.current ? 1 : 0);
     audio.playStageStart();
     setGameState('PLAYING');
   };
@@ -3312,16 +3315,29 @@ export default function App() {
         enemies.current.push(e);
       }
     } else {
-      const aliveCount = enemies.current.filter(e => e.alive).length;
-      wavePeakAliveRef.current = Math.max(wavePeakAliveRef.current, aliveCount);
+      const aliveBoss = enemies.current.find(e => e.alive && e.isBoss);
 
-      if (currentTime - lastProgressUiUpdateAt.current > 120) {
-        const nextProgress = (wavePeakAliveRef.current - aliveCount) / Math.max(1, wavePeakAliveRef.current);
-        setStageProgress(Math.max(0, Math.min(1, nextProgress)));
-        lastProgressUiUpdateAt.current = currentTime;
+      if (waveHasBossRef.current) {
+        if (currentTime - lastProgressUiUpdateAt.current > 120) {
+          const bossStamina = aliveBoss ? Math.max(0, Math.min(1, (aliveBoss.health || 0) / Math.max(1, aliveBoss.maxHealth || 1))) : 0;
+          setStageProgress(bossStamina);
+          lastProgressUiUpdateAt.current = currentTime;
+        }
+
+        // Boss wave ends when the boss is defeated, regardless of remaining spawned adds.
+        isWaveCleared = !aliveBoss && !isWarping.current && !showUpgrade;
+      } else {
+        const aliveCount = enemies.current.filter(e => e.alive).length;
+        wavePeakAliveRef.current = Math.max(wavePeakAliveRef.current, aliveCount);
+
+        if (currentTime - lastProgressUiUpdateAt.current > 120) {
+          const nextProgress = (wavePeakAliveRef.current - aliveCount) / Math.max(1, wavePeakAliveRef.current);
+          setStageProgress(prev => Math.max(prev, Math.max(0, Math.min(1, nextProgress))));
+          lastProgressUiUpdateAt.current = currentTime;
+        }
+
+        isWaveCleared = aliveCount === 0 && !isWarping.current && !showUpgrade;
       }
-
-      isWaveCleared = aliveCount === 0 && !isWarping.current && !showUpgrade;
     }
 
     // Ambush System (VS Style constant action)
@@ -5192,7 +5208,7 @@ export default function App() {
               className="absolute top-4 right-4 flex flex-col items-end gap-1"
             >
               <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">
-                {Math.min(5, Math.ceil(wave / 2)) === 2 ? 'Survival_Protocol' : 'Engagement_Progress'}
+                {Math.min(5, Math.ceil(wave / 2)) === 2 ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Stamina' : 'Engagement_Progress')}
               </span>
               {Math.min(5, Math.ceil(wave / 2)) === 2 ? (
                 <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
