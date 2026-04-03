@@ -75,6 +75,10 @@ export default function App() {
   const wingmanRef = useRef(false);
   const wingmanPos = useRef({ x: 0, y: 0 });
 
+  // Dev-only god mode
+  const godModeRef = useRef(false);
+  const [godMode, setGodMode] = useState(false);
+
   // Game state refs for the loop
   const waveRef = useRef(1);
   const invulnerableUntil = useRef(0);
@@ -396,6 +400,7 @@ export default function App() {
   };
 
   const handlePlayerHit = () => {
+    if (godModeRef.current) return;
     if (Date.now() < invulnerableUntil.current) return;
 
     const damage = 20; // 5 hits to die
@@ -767,6 +772,17 @@ export default function App() {
         e.preventDefault();
       }
       keysPressed.current[e.code] = true;
+
+      // Dev-only god mode toggle
+      if (import.meta.env.DEV && !e.repeat && e.code === 'KeyG') {
+        const next = !godModeRef.current;
+        godModeRef.current = next;
+        setGodMode(next);
+        if (next) {
+          integrityRef.current = 100;
+          setIntegrity(100);
+        }
+      }
 
       // Allow Ctrl to trigger Slingshot Mode during an active drag
       if (!e.repeat && (e.code === 'ControlLeft' || e.code === 'ControlRight') && isMouseDown.current && !isSlingshotMode.current) {
@@ -5083,6 +5099,13 @@ export default function App() {
 
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
+
+        {/* Dev: God Mode badge */}
+        {import.meta.env.DEV && godMode && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 px-3 py-0.5 bg-yellow-400/20 border border-yellow-400/60 rounded-full pointer-events-none">
+            <span className="text-[9px] font-black text-yellow-300 uppercase tracking-widest">★ GOD MODE [G]</span>
+          </div>
+        )}
 
         {/* Relic Inventory (VS Style) */}
         <div className="absolute top-16 left-4 flex flex-col gap-1 pointer-events-none">
