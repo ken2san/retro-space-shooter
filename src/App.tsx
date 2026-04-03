@@ -94,6 +94,12 @@ const SLINGSHOT_TIER1_SCREEN_LAND = 160;    // screen px of movement on release
 const SLINGSHOT_TIER2_SCREEN_LAND = 304;
 const SLINGSHOT_TIER3_SCREEN_LAND = 448;
 const SLINGSHOT_TIER4_SCREEN_LAND = 544;
+const REPAIR_POWERUP_HEAL = 15;
+const REPAIR_POWERUP_BASE_DROP_CHANCE = 0.04;
+const REPAIR_POWERUP_LOW_HP_THRESHOLD = 40;
+const REPAIR_POWERUP_LOW_HP_MULTIPLIER = 1.5;
+const REPAIR_POWERUP_DROP_COOLDOWN_MS = 10000;
+const REPAIR_POWERUP_MAX_DURING_BOSS = 1;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -231,6 +237,8 @@ export default function App() {
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
+  const lastRepairDropAt = useRef(0);
+  const repairDropsDuringBossRef = useRef(0);
   const activeEffects = useRef<Record<string, number>>({});
   const overdriveGauge = useRef(0);
   const [overdrive, setOverdrive] = useState(0);
@@ -949,6 +957,9 @@ export default function App() {
     enemyBullets.current = [];
     particles.current = [];
     trails.current = [];
+    powerUps.current = [];
+    lastRepairDropAt.current = 0;
+    repairDropsDuringBossRef.current = 0;
     scraps.current = [];
     asteroids.current = [];
     blocks.current = [];
@@ -2369,7 +2380,12 @@ export default function App() {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist < 30) {
-        activeEffects.current[p.type] = Date.now() + 8000; // 8 seconds
+        if (p.type === 'REPAIR') {
+          integrityRef.current = Math.min(100, integrityRef.current + REPAIR_POWERUP_HEAL);
+          setIntegrity(integrityRef.current);
+        } else {
+          activeEffects.current[p.type] = Date.now() + 8000; // 8 seconds
+        }
         p.life = 0;
         audio.playPowerUp?.(); // Optional sound
         setScore(s => s + 500);
@@ -3806,6 +3822,10 @@ export default function App() {
 
     // Collision detection
     const aliveEnemies = enemies.current.filter(e => e.alive);
+    const hasAliveBoss = aliveEnemies.some(e => e.isBoss);
+    if (!hasAliveBoss) {
+      repairDropsDuringBossRef.current = 0;
+    }
     const playerBullets = bullets.current;
 
     for (let i = playerBullets.length - 1; i >= 0; i--) {
@@ -3980,6 +4000,30 @@ export default function App() {
             const gaugeGain = (enemy.isDiving ? 2.2 : 0.9) * stageGainScale;
             overdriveGauge.current = Math.min(100, overdriveGauge.current + gaugeGain);
             setOverdrive(overdriveGauge.current);
+          }
+
+          // Emergency repair drop: low chance, cooldown-gated, with low-HP bias.
+          if (integrityRef.current < 100) {
+            const repairDropNow = Date.now();
+            const lowHpBonus = integrityRef.current <= REPAIR_POWERUP_LOW_HP_THRESHOLD
+              ? REPAIR_POWERUP_LOW_HP_MULTIPLIER
+              : 1;
+            const repairDropChance = REPAIR_POWERUP_BASE_DROP_CHANCE * lowHpBonus;
+            const repairCooldownReady = repairDropNow - lastRepairDropAt.current >= REPAIR_POWERUP_DROP_COOLDOWN_MS;
+            const bossRepairCapReached = hasAliveBoss && repairDropsDuringBossRef.current >= REPAIR_POWERUP_MAX_DURING_BOSS;
+
+            if (repairCooldownReady && !bossRepairCapReached && Math.random() < repairDropChance) {
+              powerUps.current.push({
+                x: enemy.x + enemy.width / 2,
+                y: enemy.y + enemy.height / 2,
+                type: 'REPAIR',
+                life: 1,
+              });
+              lastRepairDropAt.current = repairDropNow;
+              if (hasAliveBoss) {
+                repairDropsDuringBossRef.current += 1;
+              }
+            }
           }
 
           // Spawn Power-up chance
@@ -4821,7 +4865,14 @@ export default function App() {
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(Date.now() / 500);
-      const color = p.type === 'MULTISHOT' ? '#ffcc00' : p.type === 'SHIELD' ? '#33ccff' : '#ff33cc';
+      const color = p.type === 'MULTISHOT'
+        ? '#ffcc00'
+        : p.type === 'SHIELD'
+          ? '#33ccff'
+          : p.type === 'REPAIR'
+            ? '#66ff99'
+            : '#ff33cc';
+      const label = p.type === 'REPAIR' ? 'H' : p.type[0];
       ctx.shadowBlur = 15;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
@@ -4831,7 +4882,7 @@ export default function App() {
       ctx.font = 'bold 12px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(p.type[0], 0, 0);
+      ctx.fillText(label, 0, 0);
       ctx.restore();
     });
 

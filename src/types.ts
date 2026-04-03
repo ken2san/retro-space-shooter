@@ -90,7 +90,7 @@ export interface Trail {
 export interface PowerUp {
   x: number;
   y: number;
-  type: 'MULTISHOT' | 'SHIELD' | 'RAPIDFIRE';
+  type: 'MULTISHOT' | 'SHIELD' | 'RAPIDFIRE' | 'REPAIR';
   life: number;
 }
 
