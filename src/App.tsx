@@ -208,6 +208,7 @@ export default function App() {
   const frameTimeSamplesMs = useRef<number[]>([]);
   const fpsSamples = useRef<number[]>([]);
   const lastPerfUiUpdateAt = useRef(0);
+  const renderLoadTierRef = useRef(0); // 0=full, 1=reduced, 2=minimal
   const [survivalTime, setSurvivalTime] = useState(30);
   const survivalTimerRef = useRef(30);
   const [isWarpingState, setIsWarpingState] = useState(false);
@@ -3757,7 +3758,8 @@ export default function App() {
       ctx.save();
       ctx.globalCompositeOperation = 'screen';
       const pulse = Math.sin(Date.now() / 100) * 0.1;
-      ctx.fillStyle = `rgba(255, 51, 102, ${0.1 + pulse})`;
+      const overdriveFxScale = renderLoadTierRef.current === 2 ? 0.35 : renderLoadTierRef.current === 1 ? 0.65 : 1;
+      ctx.fillStyle = `rgba(255, 51, 102, ${(0.1 + pulse) * overdriveFxScale})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       ctx.restore();
     }
@@ -4667,10 +4669,13 @@ export default function App() {
     ctx.restore(); // Restore from shake
 
     // Nebula Pass Effect (boss/late-stage ambience only when trippy is active)
-    if (trippyIntensity.current > 0.05) {
+    const nebulaFrameDivisor = renderLoadTierRef.current === 0 ? 1 : renderLoadTierRef.current === 1 ? 2 : 3;
+    const shouldRenderNebula = Math.floor(Date.now() / 16) % nebulaFrameDivisor === 0;
+    if (trippyIntensity.current > 0.05 && shouldRenderNebula) {
       ctx.save();
       const time = Date.now() / 2000;
-      const intensity = trippyIntensity.current * 0.18 + (pulseRef.current * 0.06 * trippyIntensity.current);
+      const nebulaLoadScale = renderLoadTierRef.current === 2 ? 0.4 : renderLoadTierRef.current === 1 ? 0.65 : 1;
+      const intensity = (trippyIntensity.current * 0.18 + (pulseRef.current * 0.06 * trippyIntensity.current)) * nebulaLoadScale;
 
       const nebulaGradient = ctx.createRadialGradient(
         CANVAS_WIDTH / 2 + Math.sin(time) * 150,
@@ -4699,7 +4704,8 @@ export default function App() {
 
     // Flash
     if (flash.current > 0) {
-      const flashAlpha = flash.current * 0.3;
+      const flashScale = renderLoadTierRef.current === 2 ? 0.12 : renderLoadTierRef.current === 1 ? 0.2 : 0.3;
+      const flashAlpha = flash.current * flashScale;
       ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
@@ -5020,16 +5026,16 @@ export default function App() {
       }
     }
 
-    // Scanlines - Disabled on mobile
-    if (!isMobile) {
+    // Scanlines - disabled on mobile and auto-throttled under heavy load
+    if (!isMobile && renderLoadTierRef.current === 0) {
       mainCtx.fillStyle = 'rgba(18, 16, 16, 0.1)';
       for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
         mainCtx.fillRect(0, i, CANVAS_WIDTH, 1);
       }
     }
 
-    // Vignette - Disabled on mobile
-    if (!isMobile) {
+    // Vignette - keep on normal/reduced quality, disable on minimal tier
+    if (!isMobile && renderLoadTierRef.current < 2) {
       const gradient = mainCtx.createRadialGradient(
         CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 4,
         CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH / 1.2
@@ -5068,11 +5074,24 @@ export default function App() {
     if (now - lastPerfUiUpdateAt.current >= 500) {
       lastPerfUiUpdateAt.current = now;
       const aliveEnemies = enemies.current.reduce((count, enemy) => count + (enemy.alive ? 1 : 0), 0);
+      const p50Fps = getPercentile(fpsSamples.current, 50);
+      const p95Fps = getPercentile(fpsSamples.current, 95);
+      const p50Frame = getPercentile(frameTimeSamplesMs.current, 50);
+      const p95Frame = getPercentile(frameTimeSamplesMs.current, 95);
+
+      // Adaptive quality control with hysteresis: reduce expensive full-screen effects only when needed.
+      const prevTier = renderLoadTierRef.current;
+      let nextTier = prevTier;
+      if (p95Frame > 48) nextTier = 2;
+      else if (p95Frame > 36) nextTier = 1;
+      else if (p95Frame < 28) nextTier = 0;
+      renderLoadTierRef.current = nextTier;
+
       setPerfStats({
-        fpsP50: getPercentile(fpsSamples.current, 50),
-        fpsP95: getPercentile(fpsSamples.current, 95),
-        frameMsP50: getPercentile(frameTimeSamplesMs.current, 50),
-        frameMsP95: getPercentile(frameTimeSamplesMs.current, 95),
+        fpsP50: p50Fps,
+        fpsP95: p95Fps,
+        frameMsP50: p50Frame,
+        frameMsP95: p95Frame,
         enemies: aliveEnemies,
         bullets: bullets.current.length,
         enemyBullets: enemyBullets.current.length,
