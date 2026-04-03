@@ -62,10 +62,15 @@ const SLINGSHOT_ATTACK_PREVIEW_THRESHOLD = SLINGSHOT_THRESHOLD + 30;
 const SLINGSHOT_TIER1_SCREEN_THRESH = 44;   // screen px of pull past preview threshold
 const SLINGSHOT_TIER2_SCREEN_THRESH = 104;
 const SLINGSHOT_TIER3_SCREEN_THRESH = 168;
-const SLINGSHOT_TIER1_SCREEN_LAND = 160;    // screen px of movement on release
+const SLINGSHOT_TIER1_SCREEN_LAND = 160;    // screen px of movement on release (desktop)
 const SLINGSHOT_TIER2_SCREEN_LAND = 304;
 const SLINGSHOT_TIER3_SCREEN_LAND = 448;
 const SLINGSHOT_TIER4_SCREEN_LAND = 544;
+// Mobile: same thresholds, but Tier1 is tighter and Tier2 jumps much farther for clear contrast
+const SLINGSHOT_MOBILE_TIER1_SCREEN_LAND = 130;
+const SLINGSHOT_MOBILE_TIER2_SCREEN_LAND = 420;
+const SLINGSHOT_MOBILE_TIER3_SCREEN_LAND = 520;
+const SLINGSHOT_MOBILE_TIER4_SCREEN_LAND = 600;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -601,10 +606,17 @@ export default function App() {
     // Same physical drag effort produces the same tier on any screen size.
     const attackScreen = attackDist * scale;
     let landingScreen: number;
-    if (attackScreen < SLINGSHOT_TIER1_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER1_SCREEN_LAND;
-    else if (attackScreen < SLINGSHOT_TIER2_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER2_SCREEN_LAND;
-    else if (attackScreen < SLINGSHOT_TIER3_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER3_SCREEN_LAND;
-    else landingScreen = SLINGSHOT_TIER4_SCREEN_LAND;
+    if (isMobile) {
+      if (attackScreen < SLINGSHOT_TIER1_SCREEN_THRESH) landingScreen = SLINGSHOT_MOBILE_TIER1_SCREEN_LAND;
+      else if (attackScreen < SLINGSHOT_TIER2_SCREEN_THRESH) landingScreen = SLINGSHOT_MOBILE_TIER2_SCREEN_LAND;
+      else if (attackScreen < SLINGSHOT_TIER3_SCREEN_THRESH) landingScreen = SLINGSHOT_MOBILE_TIER3_SCREEN_LAND;
+      else landingScreen = SLINGSHOT_MOBILE_TIER4_SCREEN_LAND;
+    } else {
+      if (attackScreen < SLINGSHOT_TIER1_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER1_SCREEN_LAND;
+      else if (attackScreen < SLINGSHOT_TIER2_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER2_SCREEN_LAND;
+      else if (attackScreen < SLINGSHOT_TIER3_SCREEN_THRESH) landingScreen = SLINGSHOT_TIER3_SCREEN_LAND;
+      else landingScreen = SLINGSHOT_TIER4_SCREEN_LAND;
+    }
 
     return landingScreen / scale;
   };
