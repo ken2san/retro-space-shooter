@@ -5499,8 +5499,8 @@ export default function App() {
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Ghosting / Motion Trails (Trippy)
-    if (trippyIntensity.current > 0.4) {
+    // Ghosting / Motion Trails (Trippy) - Skip under load
+    if (trippyIntensity.current > 0.4 && renderLoadTierRef.current === 0) {
       mainCtx.save();
       mainCtx.globalAlpha = 0.3 * trippyIntensity.current;
       const offset = 5 * trippyIntensity.current;
@@ -5509,8 +5509,8 @@ export default function App() {
       mainCtx.restore();
     }
 
-    // Radial Warp Streaks (Stylish Warp)
-    if (warpFactor.current > 0.1 && !isMobile) {
+    // Radial Warp Streaks (Stylish Warp) - Throttle under load
+    if (warpFactor.current > 0.1 && !isMobile && renderLoadTierRef.current <= 1) {
       mainCtx.save();
       mainCtx.translate(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
 
@@ -5617,7 +5617,8 @@ export default function App() {
       mainCtx.translate(-CANVAS_WIDTH / 2, -CANVAS_HEIGHT / 2);
     }
 
-    if (caIntensity > (isMobile ? 4 : 0.5)) {
+    // Chromatic Aberration - Skip under heavy load
+    if (caIntensity > (isMobile ? 4 : 0.5) && renderLoadTierRef.current === 0) {
       mainCtx.globalCompositeOperation = 'screen';
       // Red
       mainCtx.drawImage(offscreenCanvas.current, -caIntensity, 0);
