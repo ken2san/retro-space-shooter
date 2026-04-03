@@ -1441,7 +1441,7 @@ export default function App() {
     // Update trippy intensity
     const isBossActive = enemies.current.some(e => e.isBoss && e.alive);
     pulseRef.current = audio.getPulse();
-    const targetTrippy = (isBossActive ? 0.6 : 0) + (currentStage >= 4 ? 0.3 : 0);
+    const targetTrippy = (isBossActive ? 0.25 : 0) + (currentStage >= 4 ? 0.2 : 0);
     trippyIntensity.current += (targetTrippy - trippyIntensity.current) * 0.05 * dt;
     // Add beat pulse to trippy intensity
     const effectiveTrippy = trippyIntensity.current + pulseRef.current * 0.15 * trippyIntensity.current;
@@ -4612,7 +4612,7 @@ export default function App() {
     if (currentStage >= 3 || trippyIntensity.current > 0.1) {
       ctx.save();
       const time = Date.now() / 2000;
-      const intensity = (currentStage === 3 ? 0.1 : 0) + trippyIntensity.current * 0.3 + (pulseRef.current * 0.15 * trippyIntensity.current);
+      const intensity = trippyIntensity.current * 0.18 + (pulseRef.current * 0.06 * trippyIntensity.current);
 
       const nebulaGradient = ctx.createRadialGradient(
         CANVAS_WIDTH / 2 + Math.sin(time) * 150,
@@ -4634,27 +4634,14 @@ export default function App() {
       ctx.globalCompositeOperation = 'screen';
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // Add some "static" noise / particles
-      if (trippyIntensity.current > 0.3) {
-        ctx.globalAlpha = trippyIntensity.current * 0.1;
-        for (let i = 0; i < 10; i++) {
-          const x = Math.random() * CANVAS_WIDTH;
-          const y = Math.random() * CANVAS_HEIGHT;
-          const size = Math.random() * 100 + 50;
-          ctx.fillStyle = i % 2 === 0 ? '#ff00ff' : '#00ffff';
-          ctx.beginPath();
-          ctx.arc(x, y, size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
       ctx.globalAlpha = 1.0;
       ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
     }
 
     // Flash
-    if (flash.current > 0 || pulseRef.current > 0.1) {
-      const flashAlpha = (flash.current * 0.3) + (pulseRef.current * 0.05 * trippyIntensity.current);
+    if (flash.current > 0) {
+      const flashAlpha = flash.current * 0.3;
       ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     }
