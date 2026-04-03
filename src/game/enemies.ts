@@ -105,14 +105,14 @@ export const buildWaveEnemies = (
       height: 120,
       isBoss: true,
       bossType: BossType.SWARM,
-      health: 3000,
-      maxHealth: 3000,
+      health: 2200,
+      maxHealth: 2200,
       phase: 1,
       moveDir: 1,
       lastShotTime: 0,
     };
     enemies.push(boss);
-    return { enemies, bossHealth: { current: 3000, max: 3000 }, playBossWarning: true };
+    return { enemies, bossHealth: { current: 2200, max: 2200 }, playBossWarning: true };
   }
 
   if (stage === 1) {

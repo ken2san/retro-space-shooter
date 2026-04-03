@@ -536,7 +536,7 @@ export default function App() {
     initEnemies(waveRef.current);
     waveHasBossRef.current = enemies.current.some(e => e.alive && e.isBoss);
     wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
-    setStageProgress(waveHasBossRef.current ? 1 : 0);
+    setStageProgress(0);
 
     stageStartTime.current = 0;
     survivalTimerRef.current = 30;
@@ -772,7 +772,7 @@ export default function App() {
     initEnemies(1);
     waveHasBossRef.current = enemies.current.some(e => e.alive && e.isBoss);
     wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
-    setStageProgress(waveHasBossRef.current ? 1 : 0);
+    setStageProgress(0);
     audio.playStageStart();
     setGameState('PLAYING');
   };
@@ -2473,9 +2473,9 @@ export default function App() {
           } else if (enemy.bossType === BossType.SWARM) {
             // Spawns small fast enemies (capped to avoid runaway array growth)
             const liveSubCount = enemies.current.filter(e => e.alive && !e.isBoss).length;
-            if (liveSubCount < 12 && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1000 : 2000)) {
+            if (liveSubCount < 8 && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1400 : 2600)) {
               enemy.lastShotTime = currentTime;
-              for (let i = 0; i < 3; i++) {
+              for (let i = 0; i < 2; i++) {
                 const offsetX = (Math.random() - 0.5) * 60;
                 const offsetY = (Math.random() - 0.5) * 40;
                 const swarmEnemy: Enemy = {
@@ -2584,11 +2584,16 @@ export default function App() {
 
           // General Boss Shooting
           let shootInterval = enemy.phase === 3 ? 600 : enemy.phase === 2 ? 1000 : 1500;
+          if (enemy.bossType === BossType.SWARM) {
+            shootInterval += 400;
+          }
           if (currentTime - (enemy.lastShotTime || 0) > shootInterval) {
             enemy.lastShotTime = currentTime;
             audio.playEnemyShoot(enemy.x + enemy.width / 2);
             // Spread shot
-            const count = enemy.phase === 3 ? 7 : 5;
+            const count = enemy.bossType === BossType.SWARM
+              ? (enemy.phase === 3 ? 5 : 3)
+              : (enemy.phase === 3 ? 7 : 5);
             for (let i = 0; i < count; i++) {
               const angle = (Math.PI / count) * i + Math.PI / 4;
               enemyBullets.current.push({
@@ -2745,10 +2750,10 @@ export default function App() {
     // Final Separation Pass (Post-movement)
     // This ensures enemies don't overlap even if their formulas try to put them in the same spot
     enemies.current.forEach((enemy) => {
-      if (!enemy.alive || enemy.state === 'ENTERING') return;
+      if (!enemy.alive || enemy.state === 'ENTERING' || enemy.isBoss) return;
 
       enemies.current.forEach((other) => {
-        if (enemy === other || !other.alive || other.state === 'ENTERING') return;
+        if (enemy === other || !other.alive || other.state === 'ENTERING' || other.isBoss) return;
 
         const dx = enemy.x - other.x;
         const dy = enemy.y - other.y;
@@ -3320,7 +3325,8 @@ export default function App() {
       if (waveHasBossRef.current) {
         if (currentTime - lastProgressUiUpdateAt.current > 120) {
           const bossStamina = aliveBoss ? Math.max(0, Math.min(1, (aliveBoss.health || 0) / Math.max(1, aliveBoss.maxHealth || 1))) : 0;
-          setStageProgress(bossStamina);
+          const bossProgress = 1 - bossStamina;
+          setStageProgress(bossProgress);
           lastProgressUiUpdateAt.current = currentTime;
         }
 
@@ -5208,7 +5214,7 @@ export default function App() {
               className="absolute top-4 right-4 flex flex-col items-end gap-1"
             >
               <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">
-                {Math.min(5, Math.ceil(wave / 2)) === 2 ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Stamina' : 'Engagement_Progress')}
+                {Math.min(5, Math.ceil(wave / 2)) === 2 ? 'Survival_Protocol' : (waveHasBossRef.current ? 'Boss_Progress' : 'Engagement_Progress')}
               </span>
               {Math.min(5, Math.ceil(wave / 2)) === 2 ? (
                 <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
