@@ -49,6 +49,8 @@ export interface Enemy {
   prevX?: number;
   prevY?: number;
   stunnedUntil: number;
+  knockbackVX?: number;
+  knockbackVY?: number;
   speedScale: number;
   amplitudeScale: number;
   shield?: number;

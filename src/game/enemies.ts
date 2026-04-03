@@ -46,6 +46,8 @@ export const createEnemy = (
     isTractorBeaming: false,
     tractorBeamX: 0,
     stunnedUntil: 0,
+    knockbackVX: 0,
+    knockbackVY: 0,
     speedScale: type === 0 ? 1.5 : type === 1 ? 1.2 : type === 2 ? 0.7 : type === 4 ? 0.9 : 1.0,
     amplitudeScale: type === 0 ? 0.8 : type === 1 ? 1.5 : type === 2 ? 0.5 : type === 4 ? 0.7 : 1.2,
     shield: type === 4 ? 20 : 0,

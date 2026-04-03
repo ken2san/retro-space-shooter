@@ -49,6 +49,11 @@ const SLINGSHOT_SHIELD_MIN_RADIUS = 42;
 const SLINGSHOT_SHIELD_MAX_RADIUS = 122;
 const SLINGSHOT_SHIELD_THICKNESS = 18;
 const SLINGSHOT_SHIELD_HALF_ARC = Math.PI / 2;
+const SLINGSHOT_SHIELD_STUN_MS = 420;
+const SLINGSHOT_SHIELD_DIVE_STUN_MS = 720;
+const SLINGSHOT_SHIELD_KNOCKBACK = 16;
+const SLINGSHOT_SHIELD_DIVE_KNOCKBACK = 26;
+const SLINGSHOT_SHIELD_BOSS_KNOCKBACK = 6;
 const SLINGSHOT_DEFENSE_ONLY_MAX_PULL = 72;
 const SLINGSHOT_DEFENSE_ONLY_GUARD_MS = 360;
 const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
@@ -2685,13 +2690,20 @@ export default function App() {
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
 
-      // EMP Stun check
+      enemy.prevX = enemy.x;
+      enemy.prevY = enemy.y;
+
+      // Stunned enemies drift on residual knockback, then resume normal behavior.
       if (enemy.stunnedUntil && enemy.stunnedUntil > currentTime) {
+        enemy.x += (enemy.knockbackVX || 0) * dt;
+        enemy.y += (enemy.knockbackVY || 0) * dt;
+        enemy.knockbackVX = (enemy.knockbackVX || 0) * Math.pow(0.9, dt);
+        enemy.knockbackVY = (enemy.knockbackVY || 0) * Math.pow(0.9, dt);
         return;
       }
 
-      enemy.prevX = enemy.x;
-      enemy.prevY = enemy.y;
+      enemy.knockbackVX = 0;
+      enemy.knockbackVY = 0;
 
       // Graze Detection
       const edx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
@@ -3440,7 +3452,19 @@ export default function App() {
           enemy.x += (dx / pushDist) * pushStrength;
           enemy.y += (dy / pushDist) * pushStrength;
           if (!enemy.isBoss) {
-            enemy.stunnedUntil = Math.max(enemy.stunnedUntil, frameNow + 180);
+            const stunMs = enemy.isDiving ? SLINGSHOT_SHIELD_DIVE_STUN_MS : SLINGSHOT_SHIELD_STUN_MS;
+            const knockback = enemy.isDiving ? SLINGSHOT_SHIELD_DIVE_KNOCKBACK : SLINGSHOT_SHIELD_KNOCKBACK;
+            enemy.stunnedUntil = Math.max(enemy.stunnedUntil, frameNow + stunMs);
+            enemy.knockbackVX = (dx / pushDist) * knockback;
+            enemy.knockbackVY = (dy / pushDist) * knockback;
+            if (enemy.isDiving) {
+              enemy.isDiving = false;
+              enemy.isReturning = true;
+              enemy.state = 'RETURNING';
+            }
+          } else {
+            enemy.knockbackVX = (dx / pushDist) * SLINGSHOT_SHIELD_BOSS_KNOCKBACK;
+            enemy.knockbackVY = (dy / pushDist) * SLINGSHOT_SHIELD_BOSS_KNOCKBACK;
           }
           emitSlingshotShieldImpact(enemyCenterX, enemyCenterY, enemy.isBoss ? 1.4 : 1);
           const shieldOdCost = enemy.isBoss ? 20 : 12;
