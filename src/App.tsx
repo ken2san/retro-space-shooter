@@ -57,6 +57,7 @@ const SLINGSHOT_SHIELD_BOSS_KNOCKBACK = 6;
 const SLINGSHOT_SHIELD_OBSTACLE_RECOIL = 14;
 const SLINGSHOT_SHIELD_WALL_RECOIL = 18;
 const SLINGSHOT_SHIELD_OBSTACLE_RECOIL_MS = 90;
+const SLINGSHOT_ATTACK_OBSTACLE_HIT_MS = 80;
 const SLINGSHOT_DEFENSE_ONLY_MAX_PULL = 72;
 const SLINGSHOT_DEFENSE_ONLY_GUARD_MS = 360;
 const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
@@ -205,6 +206,7 @@ export default function App() {
   const slingshotShieldRadius = useRef(56);
   const slingshotShieldFxAt = useRef(0);
   const slingshotShieldObstacleRecoilAt = useRef(0);
+  const slingshotObstacleKickAt = useRef(0);
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -554,6 +556,8 @@ export default function App() {
     slingshotGuardCooldownUntil.current = 0;
     slingshotShieldAngle.current = -Math.PI / 2;
     slingshotShieldRadius.current = 56;
+    slingshotShieldObstacleRecoilAt.current = 0;
+    slingshotObstacleKickAt.current = 0;
   };
 
   const normalizeAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -856,6 +860,8 @@ export default function App() {
     slingshotGuardCooldownUntil.current = 0;
     slingshotShieldAngle.current = -Math.PI / 2;
     slingshotShieldRadius.current = 56;
+    slingshotShieldObstacleRecoilAt.current = 0;
+    slingshotObstacleKickAt.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     targetPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     bullets.current = [];
@@ -2137,7 +2143,28 @@ export default function App() {
       const outer = shieldState.radius + shieldState.thickness + padding;
       return aoff <= SLINGSHOT_SHIELD_HALF_ARC && ddist >= inner && ddist <= outer;
     };
-    const isActivelyDraggingShield = (isMouseDown.current || isTouching.current || isVirtualDragActive.current) && isSlingshotMode.current;
+    const isSlingshotAttacking = frameNow < slingshotAttackUntil.current;
+    const registerSlingshotCombo = (basePoints: number) => {
+      if (!isSlingshotAttacking) return;
+
+      if (frameNow - lastHitTime.current < SLINGSHOT_COMBO_WINDOW_MS) {
+        comboRef.current += 1;
+      } else {
+        comboRef.current = 1;
+      }
+      lastHitTime.current = frameNow;
+      setCombo(comboRef.current);
+
+      const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.15);
+      setScore((s) => s + basePoints + comboBonus);
+
+      if (!isOverdriveActiveRef.current) {
+        const gaugeGain = Math.min(3.5, 1.4 + comboRef.current * 0.25);
+        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + gaugeGain);
+        setOverdrive(overdriveGauge.current);
+      }
+    };
+    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking;
     const getShieldObstacleCollision = (x: number, y: number, width: number, height: number, padding = 0) => {
       if (!shieldState.active) return null;
       const caught = doesShieldCatchRect(x, y, width, height, padding) || doesShieldCatchAtPrev(x, y, width, height, padding);
@@ -2149,6 +2176,22 @@ export default function App() {
       const dy = playerCenterY - centerY;
       const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
       return { centerX, centerY, dx, dy, dist };
+    };
+    const getObstacleImpact = (x: number, y: number, width: number, height: number) => {
+      const centerX = x + width / 2;
+      const centerY = y + height / 2;
+      const dx = playerCenterX - centerX;
+      const dy = playerCenterY - centerY;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      return { centerX, centerY, dx, dy, dist };
+    };
+    const syncPlayerDragState = (displacementX: number, displacementY: number) => {
+      playerPos.current.x += displacementX;
+      playerPos.current.y += displacementY;
+      playerStartPos.current.x += displacementX;
+      playerStartPos.current.y += displacementY;
+      targetPos.current.x += displacementX;
+      targetPos.current.y += displacementY;
     };
     const applyShieldObstacleRecoil = (
       collision: { centerX: number; centerY: number; dx: number; dy: number; dist: number },
@@ -2164,16 +2207,49 @@ export default function App() {
       const displacementY = (collision.dy / collision.dist) * Math.min(14, recoil * 0.8);
       playerVel.current.x += recoilX;
       playerVel.current.y += recoilY;
-      playerPos.current.x += displacementX;
-      playerPos.current.y += displacementY;
-      playerStartPos.current.x += displacementX;
-      playerStartPos.current.y += displacementY;
-      targetPos.current.x += displacementX;
-      targetPos.current.y += displacementY;
+      syncPlayerDragState(displacementX, displacementY);
       isSnapping.current = Math.max(isSnapping.current, 4);
       emitSlingshotShieldImpact(collision.centerX, collision.centerY, impact);
       overdriveGauge.current = Math.max(0, overdriveGauge.current - odCost);
       setOverdrive(overdriveGauge.current);
+    };
+    const stopSlingshotAttack = () => {
+      slingshotAttackUntil.current = 0;
+      slingshotTravelUntil.current = 0;
+      slingshotLandingTarget.current = null;
+    };
+    const applySlingshotWallBounce = (
+      collision: { centerX: number; centerY: number; dx: number; dy: number; dist: number },
+      impact: number,
+    ) => {
+      if (frameNow - slingshotObstacleKickAt.current < SLINGSHOT_ATTACK_OBSTACLE_HIT_MS) return;
+      slingshotObstacleKickAt.current = frameNow;
+      const recoil = SLINGSHOT_SHIELD_WALL_RECOIL * 0.9;
+      const recoilX = (collision.dx / collision.dist) * recoil;
+      const recoilY = (collision.dy / collision.dist) * recoil;
+      const displacementX = (collision.dx / collision.dist) * Math.min(12, recoil * 0.7);
+      const displacementY = (collision.dy / collision.dist) * Math.min(12, recoil * 0.7);
+      playerVel.current.x = recoilX;
+      playerVel.current.y = recoilY;
+      syncPlayerDragState(displacementX, displacementY);
+      isSnapping.current = Math.max(isSnapping.current, 6);
+      emitSlingshotShieldImpact(collision.centerX, collision.centerY, impact);
+      overdriveGauge.current = Math.max(0, overdriveGauge.current - 4);
+      setOverdrive(overdriveGauge.current);
+      stopSlingshotAttack();
+    };
+    const applySlingshotObstacleKick = (
+      collision: { centerX: number; centerY: number; dx: number; dy: number; dist: number },
+      impact: number,
+      overdriveGain: number,
+      onHit: () => void,
+    ) => {
+      if (frameNow - slingshotObstacleKickAt.current < SLINGSHOT_ATTACK_OBSTACLE_HIT_MS) return;
+      slingshotObstacleKickAt.current = frameNow;
+      emitSlingshotShieldImpact(collision.centerX, collision.centerY, impact);
+      overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + overdriveGain);
+      setOverdrive(overdriveGauge.current);
+      onHit();
     };
 
     // Maze Generation (Canyon)
@@ -2198,16 +2274,31 @@ export default function App() {
       }
 
       // Collision with player / shield
-      if (block.hp > 0 && !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current) {
-        const overlapsPlayer = (
-          playerPos.current.x < block.x + block.width &&
-          playerPos.current.x + PLAYER_WIDTH > block.x &&
-          playerPos.current.y < block.y + block.height &&
-          playerPos.current.y + PLAYER_HEIGHT > block.y
-        );
+      const overlapsPlayer = (
+        playerPos.current.x < block.x + block.width &&
+        playerPos.current.x + PLAYER_WIDTH > block.x &&
+        playerPos.current.y < block.y + block.height &&
+        playerPos.current.y + PLAYER_HEIGHT > block.y
+      );
+      const blockImpact = overlapsPlayer ? getObstacleImpact(block.x, block.y, block.width, block.height) : null;
+
+      if (block.hp > 0 && isSlingshotAttacking && blockImpact) {
+        if (block.type === 'WALL') {
+          applySlingshotWallBounce(blockImpact, 1.15);
+        } else {
+          applySlingshotObstacleKick(blockImpact, 1.25, 1.8, () => {
+            const damage = block.type === 'TENTACLE' ? 8 : Math.max(4, Math.ceil(block.maxHp * 0.5));
+            block.hp -= damage;
+            if (block.hp <= 0) {
+              triggerChainExplosion(block);
+              registerSlingshotCombo(block.type === 'TENTACLE' ? 180 : 140);
+            }
+          });
+        }
+      } else if (block.hp > 0 && !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current) {
         const shieldCollision = getShieldObstacleCollision(block.x, block.y, block.width, block.height, 12);
 
-        if (shieldCollision && isActivelyDraggingShield) {
+        if (shieldCollision && isShieldObstacleRecoilPhase) {
           applyShieldObstacleRecoil(
             shieldCollision,
             block.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
@@ -2257,28 +2348,6 @@ export default function App() {
       });
     });
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
-
-    const isSlingshotAttacking = frameNow < slingshotAttackUntil.current;
-    const registerSlingshotCombo = (basePoints: number) => {
-      if (!isSlingshotAttacking) return;
-
-      if (frameNow - lastHitTime.current < SLINGSHOT_COMBO_WINDOW_MS) {
-        comboRef.current += 1;
-      } else {
-        comboRef.current = 1;
-      }
-      lastHitTime.current = frameNow;
-      setCombo(comboRef.current);
-
-      const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.15);
-      setScore((s) => s + basePoints + comboBonus);
-
-      if (!isOverdriveActiveRef.current) {
-        const gaugeGain = Math.min(3.5, 1.4 + comboRef.current * 0.25);
-        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + gaugeGain);
-        setOverdrive(overdriveGauge.current);
-      }
-    };
 
     asteroids.current.forEach(a => {
       // Movement with inertia
@@ -2488,10 +2557,25 @@ export default function App() {
       const py = playerPos.current.y;
       const overlapsPlayer = px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
         py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height;
+      const obstacleImpact = overlapsPlayer ? getObstacleImpact(obs.x, obs.y, obs.width, obs.height) : null;
       const shieldCollision = !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current
         ? getShieldObstacleCollision(obs.x, obs.y, obs.width, obs.height, 12)
         : null;
-      if (shieldCollision && isActivelyDraggingShield) {
+      if (obs.hp > 0 && isSlingshotAttacking && obstacleImpact) {
+        if (obs.type === 'WALL') {
+          applySlingshotWallBounce(obstacleImpact, 1.25);
+        } else {
+          applySlingshotObstacleKick(obstacleImpact, 1.35, 2.2, () => {
+            const damage = obs.type === 'BUILDING' ? 18 : 10;
+            obs.hp -= damage;
+            if (obs.hp <= 0) {
+              audio.playExplosion(obs.x + obs.width / 2);
+              createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
+              registerSlingshotCombo(obs.type === 'BUILDING' ? 240 : 180);
+            }
+          });
+        }
+      } else if (shieldCollision && isShieldObstacleRecoilPhase) {
         applyShieldObstacleRecoil(
           shieldCollision,
           obs.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
