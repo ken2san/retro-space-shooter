@@ -211,6 +211,9 @@ export default function App() {
   const [survivalTime, setSurvivalTime] = useState(30);
   const survivalTimerRef = useRef(30);
   const [isWarpingState, setIsWarpingState] = useState(false);
+  const [stageProgress, setStageProgress] = useState(0);
+  const wavePeakAliveRef = useRef(1);
+  const lastProgressUiUpdateAt = useRef(0);
   const blocks = useRef<Obstacle[]>([]);
   const lastBlockRowY = useRef(0);
 
@@ -530,6 +533,8 @@ export default function App() {
     setSectorName(getStageLabelFromWave(waveRef.current));
 
     initEnemies(waveRef.current);
+    wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
+    setStageProgress(0);
 
     stageStartTime.current = 0;
     survivalTimerRef.current = 30;
@@ -763,6 +768,8 @@ export default function App() {
     shake.current = 0;
     flash.current = 0;
     initEnemies(1);
+    wavePeakAliveRef.current = Math.max(1, enemies.current.filter(e => e.alive).length);
+    setStageProgress(0);
     audio.playStageStart();
     setGameState('PLAYING');
   };
@@ -3266,14 +3273,22 @@ export default function App() {
 
     // Wave Completion Logic
     const isTimeBasedStage = currentStage === 2; // Asteroid Belt is survival based
+    const survivalDuration = getSurvivalDurationFromStage(currentStage);
 
     let isWaveCleared = false;
     if (isTimeBasedStage) {
-      // Survive for 45 seconds
+      // Survive for the stage duration
       if (!stageStartTime.current) stageStartTime.current = Date.now();
       const elapsed = (Date.now() - stageStartTime.current) / 1000;
-      setSurvivalTime(Math.max(0, 45 - Math.floor(elapsed)));
-      if (elapsed >= 45) {
+      const timeLeft = Math.max(0, survivalDuration - Math.floor(elapsed));
+      setSurvivalTime(timeLeft);
+
+      if (currentTime - lastProgressUiUpdateAt.current > 120) {
+        setStageProgress(Math.min(1, elapsed / survivalDuration));
+        lastProgressUiUpdateAt.current = currentTime;
+      }
+
+      if (elapsed >= survivalDuration) {
         isWaveCleared = true;
         stageStartTime.current = 0;
       }
@@ -3297,11 +3312,20 @@ export default function App() {
         enemies.current.push(e);
       }
     } else {
-      isWaveCleared = enemies.current.every(e => !e.alive) && !isWarping.current && !showUpgrade;
+      const aliveCount = enemies.current.filter(e => e.alive).length;
+      wavePeakAliveRef.current = Math.max(wavePeakAliveRef.current, aliveCount);
+
+      if (currentTime - lastProgressUiUpdateAt.current > 120) {
+        const nextProgress = (wavePeakAliveRef.current - aliveCount) / Math.max(1, wavePeakAliveRef.current);
+        setStageProgress(Math.max(0, Math.min(1, nextProgress)));
+        lastProgressUiUpdateAt.current = currentTime;
+      }
+
+      isWaveCleared = aliveCount === 0 && !isWarping.current && !showUpgrade;
     }
 
     // Ambush System (VS Style constant action)
-    if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage) {
+    if (gameState === 'PLAYING' && !isWarping.current && !isTimeBasedStage && currentStage > 1) {
       ambushTimer.current += dt * (1000 / 60) * timeScale.current;
       const aliveCount = enemies.current.filter(e => e.alive).length;
       const isBossWave = enemies.current.some(e => e.alive && e.isBoss);
@@ -5158,22 +5182,30 @@ export default function App() {
           </div>
         )}
 
-        {/* Survival Timer (Stage 2) */}
+        {/* Stage Progress Gauge */}
         <AnimatePresence>
-          {Math.min(5, Math.ceil(wave / 2)) === 2 && gameState === 'PLAYING' && !isWarpingState && (
+          {gameState === 'PLAYING' && !isWarpingState && (
             <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               className="absolute top-4 right-4 flex flex-col items-end gap-1"
             >
-              <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">Survival_Protocol</span>
-              <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
-                {survivalTime}s
-              </div>
+              <span className="text-[8px] text-[#00ffcc] font-bold uppercase tracking-widest">
+                {Math.min(5, Math.ceil(wave / 2)) === 2 ? 'Survival_Protocol' : 'Engagement_Progress'}
+              </span>
+              {Math.min(5, Math.ceil(wave / 2)) === 2 ? (
+                <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
+                  {survivalTime}s
+                </div>
+              ) : (
+                <div className="text-2xl font-black italic text-white drop-shadow-[0_0_10px_rgba(0,255,204,0.5)]">
+                  {Math.round(stageProgress * 100)}%
+                </div>
+              )}
               <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
                 <motion.div
-                  animate={{ width: `${(survivalTime / 45) * 100}%` }}
+                  animate={{ width: `${Math.max(0, Math.min(100, stageProgress * 100))}%` }}
                   className="h-full bg-[#00ffcc]"
                 />
               </div>
