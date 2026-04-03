@@ -54,6 +54,9 @@ const SLINGSHOT_SHIELD_DIVE_STUN_MS = 720;
 const SLINGSHOT_SHIELD_KNOCKBACK = 16;
 const SLINGSHOT_SHIELD_DIVE_KNOCKBACK = 26;
 const SLINGSHOT_SHIELD_BOSS_KNOCKBACK = 6;
+const SLINGSHOT_SHIELD_OBSTACLE_RECOIL = 9;
+const SLINGSHOT_SHIELD_WALL_RECOIL = 13;
+const SLINGSHOT_SHIELD_OBSTACLE_RECOIL_MS = 90;
 const SLINGSHOT_DEFENSE_ONLY_MAX_PULL = 72;
 const SLINGSHOT_DEFENSE_ONLY_GUARD_MS = 360;
 const SLINGSHOT_GUARD_COOLDOWN_MS = 1200;
@@ -201,6 +204,7 @@ export default function App() {
   const slingshotShieldAngle = useRef(-Math.PI / 2);
   const slingshotShieldRadius = useRef(56);
   const slingshotShieldFxAt = useRef(0);
+  const slingshotShieldObstacleRecoilAt = useRef(0);
 
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
@@ -2133,6 +2137,35 @@ export default function App() {
       const outer = shieldState.radius + shieldState.thickness + padding;
       return aoff <= SLINGSHOT_SHIELD_HALF_ARC && ddist >= inner && ddist <= outer;
     };
+    const isActivelyDraggingShield = (isMouseDown.current || isTouching.current || isVirtualDragActive.current) && isSlingshotMode.current;
+    const getShieldObstacleCollision = (x: number, y: number, width: number, height: number, padding = 0) => {
+      if (!shieldState.active) return null;
+      const caught = doesShieldCatchRect(x, y, width, height, padding) || doesShieldCatchAtPrev(x, y, width, height, padding);
+      if (!caught) return null;
+
+      const centerX = x + width / 2;
+      const centerY = y + height / 2;
+      const dx = playerCenterX - centerX;
+      const dy = playerCenterY - centerY;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      return { centerX, centerY, dx, dy, dist };
+    };
+    const applyShieldObstacleRecoil = (
+      collision: { centerX: number; centerY: number; dx: number; dy: number; dist: number },
+      recoil: number,
+      impact: number,
+      odCost: number,
+    ) => {
+      if (frameNow - slingshotShieldObstacleRecoilAt.current < SLINGSHOT_SHIELD_OBSTACLE_RECOIL_MS) return;
+      slingshotShieldObstacleRecoilAt.current = frameNow;
+      playerVel.current.x += (collision.dx / collision.dist) * recoil;
+      playerVel.current.y += (collision.dy / collision.dist) * recoil;
+      playerPos.current.x += (collision.dx / collision.dist) * Math.min(6, recoil * 0.4);
+      playerPos.current.y += (collision.dy / collision.dist) * Math.min(6, recoil * 0.4);
+      emitSlingshotShieldImpact(collision.centerX, collision.centerY, impact);
+      overdriveGauge.current = Math.max(0, overdriveGauge.current - odCost);
+      setOverdrive(overdriveGauge.current);
+    };
 
     // Maze Generation (Canyon)
     const scrollSpeed = 3 * worldSpeedScale;
@@ -2155,27 +2188,40 @@ export default function App() {
         });
       }
 
-      // Collision with player
+      // Collision with player / shield
       if (block.hp > 0 && !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current) {
-        if (playerPos.current.x < block.x + block.width &&
-            playerPos.current.x + PLAYER_WIDTH > block.x &&
-            playerPos.current.y < block.y + block.height &&
-            playerPos.current.y + PLAYER_HEIGHT > block.y) {
-          if (doesShieldCatchRect(block.x, block.y, block.width, block.height, 12)) {
-            const blockCenterX = block.x + block.width / 2;
-            const blockCenterY = block.y + block.height / 2;
-            const dx = playerCenterX - blockCenterX;
-            const dy = playerCenterY - blockCenterY;
-            const pushDist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-            playerVel.current.x += (dx / pushDist) * 4;
-            playerVel.current.y += (dy / pushDist) * 4;
+        const overlapsPlayer = (
+          playerPos.current.x < block.x + block.width &&
+          playerPos.current.x + PLAYER_WIDTH > block.x &&
+          playerPos.current.y < block.y + block.height &&
+          playerPos.current.y + PLAYER_HEIGHT > block.y
+        );
+        const shieldCollision = getShieldObstacleCollision(block.x, block.y, block.width, block.height, 12);
+
+        if (shieldCollision && isActivelyDraggingShield) {
+          applyShieldObstacleRecoil(
+            shieldCollision,
+            block.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
+            1.1,
+            6,
+          );
+          if (block.type !== 'WALL') {
+            block.hp -= 1;
+            if (block.hp <= 0) {
+              triggerChainExplosion(block);
+            }
+          }
+        } else if (overlapsPlayer) {
+          if (shieldCollision) {
+            playerVel.current.x += (shieldCollision.dx / shieldCollision.dist) * 4;
+            playerVel.current.y += (shieldCollision.dy / shieldCollision.dist) * 4;
             if (block.type !== 'WALL') {
               block.hp -= 1;
               if (block.hp <= 0) {
                 triggerChainExplosion(block);
               }
             }
-            emitSlingshotShieldImpact(blockCenterX, blockCenterY, 1.1);
+            emitSlingshotShieldImpact(shieldCollision.centerX, shieldCollision.centerY, 1.1);
             overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
             setOverdrive(overdriveGauge.current);
           } else {
@@ -2428,19 +2474,33 @@ export default function App() {
     obstacles.current.forEach(obs => {
       obs.y += 2; // Scroll down
 
-      // Collision with player
+      // Collision with player / shield
       const px = playerPos.current.x;
       const py = playerPos.current.y;
-      if (px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
-          py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height && Date.now() > invulnerableUntil.current) {
-        if (doesShieldCatchRect(obs.x, obs.y, obs.width, obs.height, 12)) {
-          const obsCenterX = obs.x + obs.width / 2;
-          const obsCenterY = obs.y + obs.height / 2;
-          const dx = playerCenterX - obsCenterX;
-          const dy = playerCenterY - obsCenterY;
-          const pushDist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-          playerVel.current.x += (dx / pushDist) * 4;
-          playerVel.current.y += (dy / pushDist) * 4;
+      const overlapsPlayer = px + PLAYER_WIDTH > obs.x && px < obs.x + obs.width &&
+        py + PLAYER_HEIGHT > obs.y && py < obs.y + obs.height;
+      const shieldCollision = !isOverdriveActiveRef.current && Date.now() > invulnerableUntil.current
+        ? getShieldObstacleCollision(obs.x, obs.y, obs.width, obs.height, 12)
+        : null;
+      if (shieldCollision && isActivelyDraggingShield) {
+        applyShieldObstacleRecoil(
+          shieldCollision,
+          obs.type === 'WALL' ? SLINGSHOT_SHIELD_WALL_RECOIL : SLINGSHOT_SHIELD_OBSTACLE_RECOIL,
+          1.2,
+          6,
+        );
+        if (obs.type !== 'WALL') {
+          obs.hp -= 2;
+          if (obs.hp <= 0) {
+            audio.playExplosion(obs.x + obs.width / 2);
+            createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
+            setScore(s => s + 200);
+          }
+        }
+      } else if (overlapsPlayer && Date.now() > invulnerableUntil.current) {
+        if (shieldCollision) {
+          playerVel.current.x += (shieldCollision.dx / shieldCollision.dist) * 4;
+          playerVel.current.y += (shieldCollision.dy / shieldCollision.dist) * 4;
           if (obs.type !== 'WALL') {
             obs.hp -= 2;
             if (obs.hp <= 0) {
@@ -2449,7 +2509,7 @@ export default function App() {
               setScore(s => s + 200);
             }
           }
-          emitSlingshotShieldImpact(obsCenterX, obsCenterY, 1.2);
+          emitSlingshotShieldImpact(shieldCollision.centerX, shieldCollision.centerY, 1.2);
           overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
           setOverdrive(overdriveGauge.current);
         } else {
