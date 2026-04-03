@@ -2459,8 +2459,9 @@ export default function App() {
               }
             }
           } else if (enemy.bossType === BossType.SWARM) {
-            // Spawns small fast enemies
-            if (currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1000 : 2000)) {
+            // Spawns small fast enemies (capped to avoid runaway array growth)
+            const liveSubCount = enemies.current.filter(e => e.alive && !e.isBoss).length;
+            if (liveSubCount < 12 && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1000 : 2000)) {
               enemy.lastShotTime = currentTime;
               for (let i = 0; i < 3; i++) {
                 const offsetX = (Math.random() - 0.5) * 60;
@@ -3254,6 +3255,11 @@ export default function App() {
       if (p.life <= 0) {
         particleList.splice(i, 1);
       }
+    }
+
+    // Prune dead enemies to prevent unbounded array growth (SWARM boss spawns every 1-2s)
+    if (enemies.current.length > 24) {
+      enemies.current = enemies.current.filter(e => e.alive);
     }
 
     // Wave Completion Logic
@@ -4608,8 +4614,8 @@ export default function App() {
 
     ctx.restore(); // Restore from shake
 
-    // Nebula Pass Effect (Stage 3+: Heavy Fire / Trippy)
-    if (currentStage >= 3 || trippyIntensity.current > 0.1) {
+    // Nebula Pass Effect (boss/late-stage ambience only when trippy is active)
+    if (trippyIntensity.current > 0.05) {
       ctx.save();
       const time = Date.now() / 2000;
       const intensity = trippyIntensity.current * 0.18 + (pulseRef.current * 0.06 * trippyIntensity.current);
