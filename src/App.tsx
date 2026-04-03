@@ -3126,6 +3126,7 @@ export default function App() {
     }
 
     if (playerHit && Date.now() > invulnerableUntil.current) {
+      if (godModeRef.current) return;
       // COUNTER HIT: If hit while dragging a high-tension slingshot, it's extra dangerous!
       const isDragging = isMouseDown.current || isTouching.current;
       const isHighTension = isDragging && isSlingshotCharged.current;
