@@ -210,6 +210,7 @@ export default function App() {
   const lastPerfUiUpdateAt = useRef(0);
   const [survivalTime, setSurvivalTime] = useState(30);
   const survivalTimerRef = useRef(30);
+  const [isWarpingState, setIsWarpingState] = useState(false);
   const blocks = useRef<Obstacle[]>([]);
   const lastBlockRowY = useRef(0);
 
@@ -543,6 +544,7 @@ export default function App() {
     setTimeout(() => {
       isWarping.current = false;
       warpFactor.current = 0;
+      setIsWarpingState(false);
     }, 1000);
   };
 
@@ -3400,6 +3402,7 @@ export default function App() {
     if (isWaveCleared && gameState === 'PLAYING') {
       isWarping.current = true;
       warpStartTime.current = Date.now();
+      setIsWarpingState(true);
       pauseStartTime.current = Date.now();
       audio.playWaveClear();
       audio.playWarp();
@@ -3973,6 +3976,7 @@ export default function App() {
         ctx.save();
         const pulse = Math.sin(Date.now() / 100) * 10;
         ctx.strokeStyle = 'rgba(255, 51, 102, 0.2)';
+      ++ replace with
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(0, 0, 300 + pulse, 0, Math.PI * 2);
@@ -4156,10 +4160,14 @@ export default function App() {
       ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
       ctx.fillRect(b.x, b.y, size, isOverdriveActiveRef.current ? size * 5 : size * 3);
     });
+    ctx.shadowBlur = 0;
 
     // Enemy Bullets
     ctx.fillStyle = '#ff9900'; // Changed to Orange for better visibility against player's pink Overdrive
-    if (!isMobile) ctx.shadowColor = '#ff9900';
+    if (!isMobile) {
+      ctx.shadowColor = '#ff9900';
+      ctx.shadowBlur = 10;
+    }
     enemyBullets.current.forEach((b) => {
       ctx.beginPath();
       ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
@@ -4178,7 +4186,7 @@ export default function App() {
         // Boss Rendering
         const color = enemy.bossType === BossType.LASER ? '#00ffcc' : '#ff3366';
         const pulse = Math.sin(Date.now() / 150) * 10;
-        ctx.shadowBlur = 20 + pulse;
+        ctx.shadowBlur = 15;
         ctx.shadowColor = color;
         ctx.strokeStyle = color;
         ctx.lineWidth = 4;
@@ -4433,9 +4441,8 @@ export default function App() {
 
       const colors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
       const color = colors[enemy.type] || '#ffcc00';
-      const pulse = Math.sin(Date.now() / 200) * 5;
 
-      ctx.shadowBlur = 15 + pulse;
+      ctx.shadowBlur = 15;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
@@ -5154,7 +5161,7 @@ export default function App() {
 
         {/* Survival Timer (Stage 2) */}
         <AnimatePresence>
-          {Math.min(5, Math.ceil(wave / 2)) === 2 && gameState === 'PLAYING' && !isWarping.current && (
+          {Math.min(5, Math.ceil(wave / 2)) === 2 && gameState === 'PLAYING' && !isWarpingState && (
             <motion.div
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -5175,6 +5182,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
+  ++ replace with
         {/* Boss Health Bar */}
         <AnimatePresence>
           {bossHealth && (
@@ -5271,6 +5279,7 @@ export default function App() {
           {gameState === 'START' && (
             <motion.div
               key="start-screen"
+              ++ replace with
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
