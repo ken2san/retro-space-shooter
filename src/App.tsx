@@ -3976,7 +3976,6 @@ export default function App() {
         ctx.save();
         const pulse = Math.sin(Date.now() / 100) * 10;
         ctx.strokeStyle = 'rgba(255, 51, 102, 0.2)';
-      ++ replace with
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(0, 0, 300 + pulse, 0, Math.PI * 2);
@@ -5182,7 +5181,6 @@ export default function App() {
           )}
         </AnimatePresence>
 
-  ++ replace with
         {/* Boss Health Bar */}
         <AnimatePresence>
           {bossHealth && (
@@ -5279,7 +5277,6 @@ export default function App() {
           {gameState === 'START' && (
             <motion.div
               key="start-screen"
-              ++ replace with
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
