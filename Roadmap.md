@@ -1,6 +1,6 @@
 # NEON DEFENDER — Development Roadmap
 
-_Last updated: 2026-04-02_
+_Last updated: 2026-04-03_
 
 > Note: Core gameplay (player, enemies, bosses, upgrades, relics, audio, mobile) is already implemented.
 > This roadmap covers technical hardening, design review, and release.
@@ -51,6 +51,18 @@ Audit the current game for feel, balance, and scope — decide what stays, what 
   - Ensure selection frequency aligns with stage pacing
 - Time-scale consistency:
   - Audit stacked slow-motion sources (Chrono, slingshot feedback, overdrive) for control feel stability
+
+### Applied Fairness Adjustments (Completed)
+
+- Slingshot/shield collision fairness hardening in `src/App.tsx`
+  - Expanded shield interception envelope and previous-position checks to reduce high-speed misses
+  - Added swept AABB for slingshot attack collision to prevent tunneling
+  - Added enemy deflection recovery window with stun + knockback drift
+- Shield vs obstacle interaction readability
+  - Added player self-recoil when dragging shield into obstacles
+  - Split obstacle interaction by phase:
+    - Shield startup/guard phase -> player recoil
+    - Active slingshot attack phase -> obstacle kick behavior (walls still block)
 
 ---
 
@@ -119,6 +131,10 @@ Raise the quality bar on performance, mobile UX, and audio.
   - Star movement and particle movement audit
     - Star warp/scroll movement now multiplies by `dtRef.current`
     - Particle movement confirmed dt-consistent in all paths
+  - Boss fight load reduction pass
+    - Tentacle boss collision checks now sample by render load tier (stride-based)
+    - Boss rendering complexity now scales with render load tier (ring count, laser glow/scanline details, tentacle segment detail)
+    - Maintains gameplay logic while reducing expensive draw paths under heavy load
 - Completed
   - P4-1: Run 60s baseline captures per fixed scenario and compare perf overlay values
   - P4-2: Mobile touch control refinement
@@ -226,3 +242,8 @@ Ship a stable, deployable build to Firebase Hosting.
 ## Current Status
 
 Active phase: **Phase 5 (Release)**
+
+### Immediate Next Validation
+
+- Re-run fixed 60s perf captures on boss-heavy windows and compare p95 frame time against prior baseline
+- Verify readability/telegraph quality for reduced boss FX at load tiers 1 and 2
