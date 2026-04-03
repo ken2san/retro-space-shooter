@@ -104,6 +104,7 @@ export default function App() {
   const playerPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
   const targetPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
   const playerVel = useRef({ x: 0, y: 0 }); // Added velocity for inertia
+  const prevPlayerPos = useRef({ x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 });
   const playerTilt = useRef(0);
   const playerScale = useRef({ x: 1, y: 1 });
   const inputVel = useRef({ x: 0, y: 0 });
@@ -1822,6 +1823,10 @@ export default function App() {
 
     // --- Player Movement Logic (Simplified) ---
 
+    // Snapshot position before any movement this frame (used for swept collision detection)
+    prevPlayerPos.current.x = playerPos.current.x;
+    prevPlayerPos.current.y = playerPos.current.y;
+
     const isDragging = isMouseDown.current || isTouching.current;
 
     // 1. DAMPING & FRICTION (Only for Slingshot Snap)
@@ -2107,6 +2112,21 @@ export default function App() {
       }
 
       return doesShieldCatchPoint(closestX, closestY, padding);
+    };
+    // Previous-position shield check: catches enemies the shield swept through this frame
+    const prevShieldCX = prevPlayerPos.current.x + PLAYER_WIDTH / 2;
+    const prevShieldCY = prevPlayerPos.current.y + PLAYER_HEIGHT / 2;
+    const doesShieldCatchAtPrev = (x: number, y: number, width: number, height: number, padding = 0) => {
+      if (!shieldState.active) return false;
+      const cx = Math.max(x, Math.min(prevShieldCX, x + width));
+      const cy = Math.max(y, Math.min(prevShieldCY, y + height));
+      const ddx = (cx === prevShieldCX && cy === prevShieldCY) ? (x + width / 2) - prevShieldCX : cx - prevShieldCX;
+      const ddy = (cx === prevShieldCX && cy === prevShieldCY) ? (y + height / 2) - prevShieldCY : cy - prevShieldCY;
+      const ddist = Math.sqrt(ddx * ddx + ddy * ddy);
+      const aoff = Math.abs(normalizeAngle(Math.atan2(ddy, ddx) - shieldState.angle));
+      const inner = Math.max(18, shieldState.radius - shieldState.thickness * 1.35 - padding);
+      const outer = shieldState.radius + shieldState.thickness + padding;
+      return aoff <= SLINGSHOT_SHIELD_HALF_ARC && ddist >= inner && ddist <= outer;
     };
 
     // Maze Generation (Canyon)
@@ -3354,12 +3374,24 @@ export default function App() {
     const py = playerPos.current.y + hitMargin;
     const pw = PLAYER_WIDTH - hitMargin * 2;
     const ph = PLAYER_HEIGHT - hitMargin * 2;
+    // Swept box: union of previous and current player positions — prevents tunneling at high velocity
+    const prevPx = prevPlayerPos.current.x + hitMargin;
+    const prevPy = prevPlayerPos.current.y + hitMargin;
+    const sweptLeft   = Math.min(px, prevPx);
+    const sweptTop    = Math.min(py, prevPy);
+    const sweptRight  = Math.max(px + pw, prevPx + pw);
+    const sweptBottom = Math.max(py + ph, prevPy + ph);
 
     let playerHit = false;
 
     for (let i = 0; i < aliveEnemies.length; i++) {
       const enemy = aliveEnemies[i];
-      const inPlayerBox = (
+      const inPlayerBox = isSlingshotAttacking ? (
+        enemy.x < sweptRight &&
+        enemy.x + enemy.width > sweptLeft &&
+        enemy.y < sweptBottom &&
+        enemy.y + enemy.height > sweptTop
+      ) : (
         enemy.x < px + pw &&
         enemy.x + enemy.width > px &&
         enemy.y < py + ph &&
@@ -3367,7 +3399,8 @@ export default function App() {
       );
       // Shield arc catches enemies even before they reach the player body
       const shieldCatch = !isSlingshotAttacking && !isOverdriveActiveRef.current
-        && doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10);
+        && (doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10)
+          || doesShieldCatchAtPrev(enemy.x, enemy.y, enemy.width, enemy.height, 10));
       if (!inPlayerBox && !shieldCatch) continue;
 
       if ((isSlingshotAttacking || isOverdriveActiveRef.current) && inPlayerBox) {
