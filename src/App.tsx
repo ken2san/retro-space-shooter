@@ -801,24 +801,20 @@ export default function App() {
       // Stage 3 "Heavy Fire": structured turret/windmill formations on indestructible walls.
       // No destructibles — difficulty comes from navigating formations + turret fire.
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
-      // Windmill arm length is 132px; rows are 100px apart vertically.
-      // Any windmill in the previous row would overlap blades with any windmill in this row.
-      // Prevent back-to-back windmill rows by checking recently scrolled blocks (prev row ≈ y=0).
-      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 25);
+      // armLen=264px; suppress windmill rows while any windmill is in the upper half of the screen
+      // to prevent visual blade overlap between consecutive rows.
+      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 400);
       const windmillLayouts: Slot[][] = [
         // Single windmill — left-centre
         [null, null, 'WINDMILL', null, null, null, null, null, null, null],
         // Single windmill — right-centre
         [null, null, null, null, null, null, null, 'WINDMILL', null, null],
-        // Two windmills — cols 2 & 7 (300px apart > 264px combined arms)
-        [null, null, 'WINDMILL', null, null, null, null, 'WINDMILL', null, null],
-        // Windmill + offset turret — different halves
-        [null, 'WINDMILL', null, null, null, null, null, null, 'TURRET_BLOCK', null],
       ];
       const quietLayouts: Slot[][] = [
         // Single turret — centre
         [null, null, null, null, null, 'TURRET_BLOCK', null, null, null, null],
-        // Breather rows (3x weight for generous breathing room)
+        // Breather rows
+        [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
@@ -2958,7 +2954,7 @@ export default function App() {
             !isOverdriveActiveRef.current && frameNow > invulnerableUntil.current) {
           const wcx = block.x + block.width / 2;
           const wcy = block.y + block.height / 2;
-          const armLen = block.height * 1.32;
+          const armLen = block.height * 2.64;
           const pCx = playerPos.current.x + PLAYER_WIDTH / 2;
           const pCy = playerPos.current.y + PLAYER_HEIGHT / 2;
           const wdx = pCx - wcx;
@@ -2966,7 +2962,7 @@ export default function App() {
           const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
           if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
             const playerAngle = Math.atan2(wdy, wdx);
-            const rot = frameNow * 0.00055 + (block.id % 100) * 0.9;
+            const rot = frameNow * 0.00020 + (block.id % 100) * 0.9;
             for (let k = 0; k < 4; k++) {
               const bladeAngle = rot + (k * Math.PI) / 2;
               const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
@@ -2990,11 +2986,32 @@ export default function App() {
             if (block.hp <= 0) {
               triggerChainExplosion(block);
             }
-          } else {
-            bullet.y = -100; // Indestructible block
+          } else if (block.type !== 'WINDMILL') {
+            bullet.y = -100; // Indestructible block (WALL/TURRET_BLOCK)
           }
+          // WINDMILL body is transparent to bullets; blade arc check below.
         }
       });
+      // Windmill blade destroys any bullet (player or enemy) that enters the swept arc.
+      if (block.type === 'WINDMILL' && block.hp > 0) {
+        const wbcx = block.x + block.width / 2;
+        const wbcy = block.y + block.height / 2;
+        const wbArm = block.height * 2.64;
+        const wbRot = frameNow * 0.00020 + (block.id % 100) * 0.9;
+        const hitsWindmillBlade = (bx: number, by: number) => {
+          const ddx = bx - wbcx;
+          const ddy = by - wbcy;
+          const dd = ddx * ddx + ddy * ddy;
+          if (dd > wbArm * wbArm || dd < 16) return false;
+          const bAngle = Math.atan2(ddy, ddx);
+          for (let k = 0; k < 4; k++) {
+            if (Math.abs(normalizeAngle(bAngle - (wbRot + (k * Math.PI) / 2))) < 0.15) return true;
+          }
+          return false;
+        };
+        bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+        enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+      }
     });
     // TURRET_BLOCK shooting: aim and fire at player
     {
@@ -5344,8 +5361,8 @@ export default function App() {
         const wcx = block.width / 2;
         const wcy = block.height / 2;
         // Arms extend well beyond block edges to act as a corridor hazard.
-        const armLen = block.height * 1.32;
-        const rot = drawNow * 0.00055 + (block.id % 100) * 0.9;
+        const armLen = block.height * 2.64;
+        const rot = drawNow * 0.00020 + (block.id % 100) * 0.9;
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ffaa';
         ctx.strokeStyle = '#00ffaa';
