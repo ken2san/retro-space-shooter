@@ -802,22 +802,23 @@ export default function App() {
       // No destructibles — difficulty comes from navigating formations + turret fire.
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
       const layouts: Slot[][] = [
-        // PLAYER_WIDTH=50px, blockWidth=60px: single-slot gap (60px) is impassable.
-        // All layouts guarantee at least one 2-consecutive-slot (120px+) clear passage.
+        // Sparse layouts — windmill timing hazard + occasional turret.
+        // Each row has at most 2 fills. Breather rows weighted 3x for pacing.
 
-        // Flanking turrets — wide centre (4 slots)
-        [null, 'WALL', 'TURRET_BLOCK', null, null, null, null, 'TURRET_BLOCK', 'WALL', null],
-        // Isolated windmill pair — wide corridors on both sides
+        // Single windmill — left-centre
+        [null, null, 'WINDMILL', null, null, null, null, null, null, null],
+        // Single windmill — right-centre
+        [null, null, null, null, null, null, null, 'WINDMILL', null, null],
+        // Two windmills — player must time a path through one gap
         [null, null, 'WINDMILL', null, null, null, null, 'WINDMILL', null, null],
-        // Side walls + turret — two 2-slot passages (slots 2-3 and 5-7)
-        ['WALL', 'WALL', null, null, 'TURRET_BLOCK', null, null, null, 'WALL', 'WALL'],
-        // Asymmetric mix — clear left flank and wide right
-        [null, null, 'WALL', 'WINDMILL', null, null, 'TURRET_BLOCK', null, null, null],
-        // Breather rows (weighted 2x)
+        // Single turret — centre
+        [null, null, null, null, null, 'TURRET_BLOCK', null, null, null, null],
+        // Windmill + offset turret — different halves
+        [null, 'WINDMILL', null, null, null, null, null, null, 'TURRET_BLOCK', null],
+        // Breather rows (3x weight for generous breathing room)
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
-        // Centre pair — wide open flanks
-        [null, null, null, null, 'TURRET_BLOCK', 'WINDMILL', null, null, null, null],
+        [null, null, null, null, null, null, null, null, null, null],
       ];
       const layout = layouts[Math.floor(Math.random() * layouts.length)];
       for (let i = 0; i < 10; i++) {
@@ -2921,7 +2922,10 @@ export default function App() {
             }
           }
         } else if (overlapsPlayer) {
-          resolvePlayerRectCollision(block.x, block.y, block.width, block.height, 2);
+          // WINDMILL body is physically passable — blades are the hazard (checked below).
+          if (block.type !== 'WINDMILL') {
+            resolvePlayerRectCollision(block.x, block.y, block.width, block.height, 2);
+          }
           if (shieldCollision) {
             if (block.type === 'TENTACLE') {
               applyShieldRainTentacleDeflect(block, shieldCollision, 1.2, 4);
@@ -2939,8 +2943,34 @@ export default function App() {
               overdriveGauge.current = Math.max(0, overdriveGauge.current - 6);
               setOverdrive(overdriveGauge.current);
             }
-          } else {
+          } else if (block.type !== 'WINDMILL') {
             handlePlayerHit();
+          }
+        }
+
+        // Windmill blade timing hazard — hit when a blade sweeps through player position.
+        // Each of the 4 blades has a +-0.22 rad (~12.5°) danger arc at arm length.
+        if (block.type === 'WINDMILL' && block.hp > 0 &&
+            !isOverdriveActiveRef.current && frameNow > invulnerableUntil.current) {
+          const wcx = block.x + block.width / 2;
+          const wcy = block.y + block.height / 2;
+          const armLen = block.height * 0.44;
+          const pCx = playerPos.current.x + PLAYER_WIDTH / 2;
+          const pCy = playerPos.current.y + PLAYER_HEIGHT / 2;
+          const wdx = pCx - wcx;
+          const wdy = pCy - wcy;
+          const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
+          if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
+            const playerAngle = Math.atan2(wdy, wdx);
+            const rot = frameNow * 0.00055 + (block.id % 100) * 0.9;
+            for (let k = 0; k < 4; k++) {
+              const bladeAngle = rot + (k * Math.PI) / 2;
+              const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
+              if (diff < 0.22) {
+                handlePlayerHit();
+                break;
+              }
+            }
           }
         }
       }
