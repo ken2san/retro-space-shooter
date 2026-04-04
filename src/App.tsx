@@ -2849,7 +2849,7 @@ export default function App() {
     };
 
     // Maze Generation (Canyon)
-    const scrollSpeed = (currentStage === 3 ? 1.0 : 3) * worldSpeedScale;
+    const scrollSpeed = (currentStage === 3 ? 0.65 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
     if (lastBlockRowY.current > 100) {
       lastBlockRowY.current = 0;
@@ -3032,7 +3032,7 @@ export default function App() {
       blocks.current.forEach(block => {
         if (block.type !== 'TURRET_BLOCK' || block.hp <= 0) return;
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
-        if (now - (block.lastShotTime ?? 0) < 1000) return;
+        if (now - (block.lastShotTime ?? 0) < 2000) return;
         block.lastShotTime = now;
         const cx = block.x + block.width / 2;
         const cy = block.y + block.height / 2;
