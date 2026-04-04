@@ -803,10 +803,9 @@ export default function App() {
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
       // Windmill (armLen=290px) is always centred on the canvas. The blade sweep covers
       // nearly the full width — the player must time passage, not dodge horizontally.
-      // Guard: don't spawn the next windmill until the current one has scrolled ~250px
-      // (y < 150 at scroll speed 1.5), giving ~2 turret/quiet rows between windmills
-      // for a windmill → turret → windmill rhythm.
-      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 150);
+      // Guard: don't spawn the next windmill until the current one has scrolled past y=500,
+      // giving a longer quiet/turret section between windmills.
+      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 500);
       const windmillLayouts: Slot[][] = [
         // Single windmill — always centred (x is overridden in the push below)
         [null, null, null, null, null, 'WINDMILL', null, null, null, null],
@@ -818,7 +817,8 @@ export default function App() {
         [null, null, 'TURRET_BLOCK', null, null, null, null, null, null, null],
         // Single turret — right
         [null, null, null, null, null, null, null, 'TURRET_BLOCK', null, null],
-        // Breather rows
+        // Breather rows (3 — weighted to space out action)
+        [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
       ];
