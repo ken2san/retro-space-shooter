@@ -801,21 +801,24 @@ export default function App() {
       // Stage 3 "Heavy Fire": structured turret/windmill formations on indestructible walls.
       // No destructibles — difficulty comes from navigating formations + turret fire.
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
-      // armLen=264px; suppress windmill rows while any windmill is in the upper half of the screen
-      // to prevent visual blade overlap between consecutive rows.
-      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 400);
+      // Windmill (armLen=290px) is always centred on the canvas. The blade sweep covers
+      // nearly the full width — the player must time passage, not dodge horizontally.
+      // Guard: don't spawn the next windmill until the current one has scrolled ~250px
+      // (y < 150 at scroll speed 1.5), giving ~2 turret/quiet rows between windmills
+      // for a windmill → turret → windmill rhythm.
+      const recentWindmill = blocks.current.some(b => b.type === 'WINDMILL' && b.y > -5 && b.y < 150);
       const windmillLayouts: Slot[][] = [
-        // Single windmill — left-centre
-        [null, null, 'WINDMILL', null, null, null, null, null, null, null],
-        // Single windmill — right-centre
-        [null, null, null, null, null, null, null, 'WINDMILL', null, null],
+        // Single windmill — always centred (x is overridden in the push below)
+        [null, null, null, null, null, 'WINDMILL', null, null, null, null],
       ];
       const quietLayouts: Slot[][] = [
-        // Single turret — centre
-        [null, null, null, null, null, 'TURRET_BLOCK', null, null, null, null],
+        // Two turrets — inner flanks
+        [null, 'TURRET_BLOCK', null, null, null, null, null, null, 'TURRET_BLOCK', null],
+        // Single turret — left
+        [null, null, 'TURRET_BLOCK', null, null, null, null, null, null, null],
+        // Single turret — right
+        [null, null, null, null, null, null, null, 'TURRET_BLOCK', null, null],
         // Breather rows
-        [null, null, null, null, null, null, null, null, null, null],
-        [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
       ];
@@ -826,7 +829,8 @@ export default function App() {
         if (!slotType) continue;
         blocks.current.push({
           id: Date.now() + i,
-          x: i * blockWidth,
+          // WINDMILL is always placed at the exact canvas centre regardless of slot index
+          x: slotType === 'WINDMILL' ? CANVAS_WIDTH / 2 - blockWidth / 2 : i * blockWidth,
           y: rowY,
           width: blockWidth,
           height: blockHeight,
@@ -2845,7 +2849,7 @@ export default function App() {
     };
 
     // Maze Generation (Canyon)
-    const scrollSpeed = 3 * worldSpeedScale;
+    const scrollSpeed = (currentStage === 3 ? 1.5 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
     if (lastBlockRowY.current > 100) {
       lastBlockRowY.current = 0;
@@ -2954,7 +2958,7 @@ export default function App() {
             !isOverdriveActiveRef.current && frameNow > invulnerableUntil.current) {
           const wcx = block.x + block.width / 2;
           const wcy = block.y + block.height / 2;
-          const armLen = block.height * 2.64;
+          const armLen = block.height * 2.9;
           const pCx = playerPos.current.x + PLAYER_WIDTH / 2;
           const pCy = playerPos.current.y + PLAYER_HEIGHT / 2;
           const wdx = pCx - wcx;
@@ -2996,7 +3000,7 @@ export default function App() {
       if (block.type === 'WINDMILL' && block.hp > 0) {
         const wbcx = block.x + block.width / 2;
         const wbcy = block.y + block.height / 2;
-        const wbArm = block.height * 2.64;
+        const wbArm = block.height * 2.9;
         const wbRot = frameNow * 0.00020 + (block.id % 100) * 0.9;
         const hitsWindmillBlade = (bx: number, by: number) => {
           const ddx = bx - wbcx;
@@ -5361,7 +5365,7 @@ export default function App() {
         const wcx = block.width / 2;
         const wcy = block.height / 2;
         // Arms extend well beyond block edges to act as a corridor hazard.
-        const armLen = block.height * 2.64;
+        const armLen = block.height * 2.9;
         const rot = drawNow * 0.00020 + (block.id % 100) * 0.9;
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ffaa';
