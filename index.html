@@ -5,63 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>NEON DEFENDER</title>
-    <script>
-      // --- AI Studio Specific Environment Guard ---
-      // This script aggressively blocks Vite's automatic reload mechanisms
-      // that trigger when the proxy connection flickers in AI Studio.
-      (function() {
-        console.log("AI Studio Guard: Initializing...");
-
-        // 1. Mock WebSocket to prevent Vite from detecting connection drops
-        const OriginalWebSocket = window.WebSocket;
-        window.WebSocket = function(url, protocols) {
-          if (typeof url === 'string' && url.includes('vite')) {
-            console.log("AI Studio Guard: Blocked Vite WebSocket connection to prevent auto-reload.");
-            // Return a dummy object that mimics a closed/silent WebSocket
-            return {
-              readyState: 3, // CLOSED
-              addEventListener: () => {},
-              removeEventListener: () => {},
-              send: () => {},
-              close: () => {},
-              onopen: null,
-              onmessage: null,
-              onerror: null,
-              onclose: null
-            };
-          }
-          return new OriginalWebSocket(url, protocols);
-        };
-        Object.assign(window.WebSocket, OriginalWebSocket);
-        window.WebSocket.prototype = OriginalWebSocket.prototype;
-
-        // 2. Block location.reload and other navigation attempts
-        window.addEventListener('beforeunload', (event) => {
-          console.log("AI Studio Guard: Blocked an attempt to reload or leave the page.");
-          event.preventDefault();
-          event.returnValue = 'Blocked Vite auto-reload';
-          return 'Blocked Vite auto-reload';
-        });
-
-        // 3. Detect if we just reloaded (for debugging)
-        if (sessionStorage.getItem('ais_reload_detected')) {
-          console.warn("AI Studio Guard: A reload was detected and recovered.");
-        }
-        sessionStorage.setItem('ais_reload_detected', 'true');
-
-        // 4. Try to override location.reload (may not work in all browsers but worth a try)
-        try {
-          const originalReload = window.location.reload;
-          Object.defineProperty(window.location, 'reload', {
-            configurable: false,
-            writable: false,
-            value: function() {
-              console.error("AI Studio Guard: Blocked a programmatic location.reload() call.");
-            }
-          });
-        } catch (e) {}
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

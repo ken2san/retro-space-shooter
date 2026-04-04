@@ -1,7 +1,7 @@
 # 3-Finger Touch Input Diagnosis Guide
 
-**Issue**: Player sometimes becomes unresponsive when using 3-finger drag on trackpad/iPad  
-**Status**: Diagnosed with detailed logging + Unit tests  
+**Issue**: Player sometimes becomes unresponsive when using 3-finger drag on trackpad/iPad
+**Status**: Diagnosed with detailed logging + Unit tests
 **Platform**: macOS trackpad 3-finger drag simulating touch events
 
 ---
@@ -9,16 +9,19 @@
 ## Quick Start: How to Reproduce & Diagnose
 
 ### 1. **Enable Input Debug Logging**
+
 ```
 http://localhost:5173/?inputDebug=1
 ```
 
 ### 2. **Open Browser DevTools**
+
 - Press `F12` (or `Cmd+Option+I` on macOS)
 - Go to **Console** tab
 - Filter by: `[NEON]` or `[TouchDebug]`
 
 ### 3. **Reproduce the Bug**
+
 - Start a game
 - Use **3-finger drag** on trackpad (or Touch Events in simulator)
 - **While dragging**, lift one finger (e.g., after 0.5 seconds)
@@ -27,6 +30,7 @@ http://localhost:5173/?inputDebug=1
 ### 4. **Check Console Logs**
 
 #### ✅ Normal Behavior
+
 ```javascript
 [TouchDebug] touchstart { touchCount: 3, totalTouches: 3, changedCount: 1 }
 [TouchDebug] touchmove-multitouch { touchCount: 3, primaryX: 420, primaryY: 640 }
@@ -36,6 +40,7 @@ http://localhost:5173/?inputDebug=1
 ```
 
 #### ❌ BUG Behavior (Player Stops Responding)
+
 ```javascript
 [TouchDebug] touchstart { touchCount: 3, totalTouches: 3, changedCount: 1 }
 [TouchDebug] touchmove-multitouch { touchCount: 3, primaryX: 420 }
@@ -51,6 +56,7 @@ http://localhost:5173/?inputDebug=1
 ## Log Field Reference
 
 ### [TouchDebug] Events
+
 ```javascript
 {
   event: 'touchstart' | 'touchmove-multitouch' | 'touchend' | 'touchend-partial',
@@ -67,6 +73,7 @@ http://localhost:5173/?inputDebug=1
 ```
 
 ### [NEON][InputDebug] State-Change
+
 ```javascript
 {
   event: 'state-change',
@@ -85,6 +92,7 @@ http://localhost:5173/?inputDebug=1
 ### Hypothesis: Stale Primary Touch Tracking
 
 When 3 fingers are down and one lifts:
+
 ```
 BEFORE: e.touches = [finger#0, finger#1, finger#2]
 AFTER:  e.touches = [finger#1, finger#2]  (finger#0 lifted)
@@ -96,6 +104,7 @@ BUG: handleTouchMove ALWAYS uses e.touches[0] for position
 ```
 
 ### Expected Symptom
+
 - Console shows: `touchmove-multitouch { touchCount: 2 }`
 - But: `targetX/targetY remain frozen` (not updating with finger motion)
 - Player: **Unresponsive** until watchdog timeout (1200ms) or all fingers lift
@@ -105,11 +114,13 @@ BUG: handleTouchMove ALWAYS uses e.touches[0] for position
 ## Unit Tests (Automated Scenarios)
 
 Run to see the bug scenarios documented:
+
 ```bash
 npm run test -- src/__tests__/touchInput.test.ts
 ```
 
 Tests include:
+
 - ✅ Normal 1-finger drag (works)
 - ✅ 3-finger simultaneous press (works)
 - 🔴 3-finger drag → 1 finger lifts (BUG reproduced)
@@ -120,27 +131,29 @@ Tests include:
 
 ## Fields to Monitor in Logs
 
-| Field | Concern | Red Flag |
-|-------|---------|----------|
-| `touchCount` | Should stay same during move | Changes without touchend event |
-| `primaryX/Y` | Should update with finger motion | Freezes while finger moving |
-| `targetX/Y` | Should match primaryX/Y offset | Frozen after multi-finger change |
-| `touchPointCount` | Should match e.touches.length | Mismatch indicates bug |
-| `idleMs` | Should stay low during active drag | Spikes to 1000+ = watchdog reset |
+| Field             | Concern                            | Red Flag                         |
+| ----------------- | ---------------------------------- | -------------------------------- |
+| `touchCount`      | Should stay same during move       | Changes without touchend event   |
+| `primaryX/Y`      | Should update with finger motion   | Freezes while finger moving      |
+| `targetX/Y`       | Should match primaryX/Y offset     | Frozen after multi-finger change |
+| `touchPointCount` | Should match e.touches.length      | Mismatch indicates bug           |
+| `idleMs`          | Should stay low during active drag | Spikes to 1000+ = watchdog reset |
 
 ---
 
 ## Interpreting Results
 
 ### ✅ Normal Sequence (All 3 fingers lift together)
+
 ```
 touchstart: 3 fingers → isTouching=1, targetX updates
 touchmove: targetX/Y move smoothly
-touchmove: targetX/Y move smoothly  
+touchmove: targetX/Y move smoothly
 touchend-all-released: isTouching=0
 ```
 
 ### ❌ Bug Sequence (1 finger lifts mid-drag)
+
 ```
 touchstart: 3 fingers → isTouching=1, targetX updates
 touchmove: targetX/Y move smoothly
@@ -175,6 +188,7 @@ touchend-partial: 1 finger lifts, 2 remain → isTouching should STAY true
 ## Recovery Mechanism (Watchdog System)
 
 If player is stuck unresponsive:
+
 - **Duration <280ms**: Input watchdog for virtual drag (pointer recovery)
 - **Duration 1200ms**: Hard reset - all touch flags forced to false
 - **Evidence in logs**: `[NEON][InputDebug] watchdog-reset { idleMs: 1247 }`
@@ -189,7 +203,7 @@ This is a safety mechanism, not the intended fix—just prevents permanent lock-
   - `handleTouchStart()` - Initialize touch tracking
   - `handleTouchMove()` - Update player position
   - `handleTouchEnd()` - Cleanup / fire slingshot
-  
+
 - **Input debug logging**: [App.tsx](./src/App.tsx#L858-L895)
   - `logTouchDebug()` - Multi-finger event logging
   - `getInputDebugSnapshot()` - Current state capture
@@ -205,15 +219,17 @@ This is a safety mechanism, not the intended fix—just prevents permanent lock-
 Once bug is confirmed and logs captured:
 
 **Option A - Conservative**: Reset all touch state if `e.touches.length` changes
+
 ```typescript
 if (lastTouchCount > e.touches.length) {
   // Finger lifted, reset to avoid stale data
-  isTouching.current = false;  
+  isTouching.current = false;
   targetPos.current = playerPos.current;
 }
 ```
 
 **Option B - Robust**: Track primary touch by identifier (not array index)
+
 ```typescript
 if (!touchPoints[primaryTouchId]) {
   // Primary lifted, promote next finger or reset
@@ -222,6 +238,7 @@ if (!touchPoints[primaryTouchId]) {
 ```
 
 **Option C - Advanced**: Use centroid of all active touches
+
 ```typescript
 const centroid = calculateCentroid(touchPoints);
 targetPos = computeMovement(centroid);
@@ -231,18 +248,18 @@ targetPos = computeMovement(centroid);
 
 ## Summary
 
-| Aspect | Status |
-|--------|--------|
-| Bug reproduced | ✅ Yes (Unit tests) |
-| Root cause identified | ✅ Stale primary touch tracking |
-| Logging added | ✅ [NEON][TouchDebug] events |
-| Watchdog verified | ✅ Prevents permanent lock-up |
-| Tests passing | ✅ All 6 tests green |
-| Ready for live testing | ✅ Run with `?inputDebug=1` |
-| Fix implemented | ⏳ Pending user confirmation of diagnosis |
+| Aspect                 | Status                                    |
+| ---------------------- | ----------------------------------------- |
+| Bug reproduced         | ✅ Yes (Unit tests)                       |
+| Root cause identified  | ✅ Stale primary touch tracking           |
+| Logging added          | ✅ [NEON][TouchDebug] events              |
+| Watchdog verified      | ✅ Prevents permanent lock-up             |
+| Tests passing          | ✅ All 6 tests green                      |
+| Ready for live testing | ✅ Run with `?inputDebug=1`               |
+| Fix implemented        | ⏳ Pending user confirmation of diagnosis |
 
 ---
 
-**Last Updated**: 2026-04-03  
-**Test File**: `src/__tests__/touchInput.test.ts`  
+**Last Updated**: 2026-04-03
+**Test File**: `src/__tests__/touchInput.test.ts`
 **Build Status**: ✅ All changes compile without errors

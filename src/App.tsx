@@ -94,6 +94,15 @@ const SLINGSHOT_TIER1_SCREEN_LAND = 160;    // screen px of movement on release
 const SLINGSHOT_TIER2_SCREEN_LAND = 304;
 const SLINGSHOT_TIER3_SCREEN_LAND = 448;
 const SLINGSHOT_TIER4_SCREEN_LAND = 544;
+const PRECISION_FOLLOW_BASE_LERP = 0.2;
+const PRECISION_FOLLOW_DRAG_LERP = 0.34;
+const PRECISION_FOLLOW_CATCHUP_LERP = 0.46;
+const PRECISION_FOLLOW_MAX_LERP = 0.58;
+const SLINGSHOT_DRAG_CURVE_DISTANCE = 120;
+const PRECISION_COAST_STOP_SPEED = 0.08;
+const PRECISION_COAST_DAMPING = 0.88;
+const SOLID_CONTACT_VELOCITY_DAMPING = 0.35;
+const SOLID_CONTACT_TANGENT_DAMPING = 0.78;
 const REPAIR_POWERUP_HEAL = 15;
 const REPAIR_POWERUP_BASE_DROP_CHANCE = 0.04;
 const REPAIR_POWERUP_LOW_HP_THRESHOLD = 40;
@@ -654,6 +663,23 @@ export default function App() {
     else landingScreen = SLINGSHOT_TIER4_SCREEN_LAND;
 
     return landingScreen / scale;
+  };
+
+  const getCurvedSlingshotDisplacement = (rawDx: number, rawDy: number, resistance: number) => {
+    const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+    if (dist <= 0) {
+      return { dx: 0, dy: 0, dist: 0 };
+    }
+
+    const normalized = Math.min(1, dist / SLINGSHOT_DRAG_CURVE_DISTANCE);
+    const eased = 1 - (1 - normalized) * (1 - normalized);
+    const curvedResistance = resistance * (0.72 + eased * 0.4);
+
+    return {
+      dx: rawDx * curvedResistance,
+      dy: rawDy * curvedResistance,
+      dist,
+    };
   };
 
   const startNextWave = () => {
@@ -1288,23 +1314,19 @@ export default function App() {
           // SLINGSHOT MODE: Rubber band logic
           const rawDx = (x - mouseAnchorPos.current.x);
           const rawDy = (y - mouseAnchorPos.current.y);
-          const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+          const curvedDisplacement = getCurvedSlingshotDisplacement(rawDx, rawDy, TOUCH_SLINGSHOT_RESISTANCE);
+          const dist = curvedDisplacement.dist;
 
           if (dist > TOUCH_SLINGSHOT_CHARGE_DEADZONE) {
             isSlingshotCharged.current = true;
           }
 
-          // Apply resistance
-          const resistance = TOUCH_SLINGSHOT_RESISTANCE;
-          const finalDx = rawDx * resistance;
-          const finalDy = rawDy * resistance;
-
           if (dist <= SLINGSHOT_DEFENSE_ONLY_MAX_PULL) {
             targetPos.current.x = playerStartPos.current.x;
             targetPos.current.y = playerStartPos.current.y;
           } else {
-            targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
-            targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+            targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + curvedDisplacement.dx));
+            targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + curvedDisplacement.dy));
           }
         } else {
           // PRECISION MODE: 1:1 Movement
@@ -1665,31 +1687,38 @@ export default function App() {
           const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
           const now = Date.now();
 
-          isMouseDown.current = true;
-          isVirtualDragActive.current = false;
-          clearVirtualDragReleaseTimer();
-          currentMousePos.current = { x, y };
-          mouseAnchorPos.current = { x, y };
-          playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
-          inputHistory.current = [{ x, y, t: now }];
+          // If slingshot is currently in-flight (idleFireTimer fired and cleared isMouseDown),
+          // only track cursor position — re-enabling drag would cause the upcoming mouseup
+          // to call handleSlingshot again and abort the flight via slingshotTravelUntil reset.
+          if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now) {
+            currentMousePos.current = { x, y };
+          } else {
+            isMouseDown.current = true;
+            isVirtualDragActive.current = false;
+            clearVirtualDragReleaseTimer();
+            currentMousePos.current = { x, y };
+            mouseAnchorPos.current = { x, y };
+            playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+            inputHistory.current = [{ x, y, t: now }];
 
-          const ctrlHeld = e.ctrlKey || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight'];
-          isSlingshotMode.current = ctrlHeld;
-          isSlingshotCharged.current = false;
-          if (ctrlHeld) {
-            audio.playSlingshot?.();
-            shake.current = Math.max(shake.current, 5);
-            createExplosion(x, y, '#00ffcc', 20);
-            timeScale.current = 0.2;
-            setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+            const ctrlHeld = e.ctrlKey || keysPressed.current['ControlLeft'] || keysPressed.current['ControlRight'];
+            isSlingshotMode.current = ctrlHeld;
+            isSlingshotCharged.current = false;
+            if (ctrlHeld) {
+              audio.playSlingshot?.();
+              shake.current = Math.max(shake.current, 5);
+              createExplosion(x, y, '#00ffcc', 20);
+              timeScale.current = 0.2;
+              setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+            }
+
+            logInputDebug('mouse-down-missed-detected', {
+              buttons: e.buttons,
+              ctrl: ctrlHeld ? 1 : 0,
+              x: Math.round(x),
+              y: Math.round(y),
+            });
           }
-
-          logInputDebug('mouse-down-missed-detected', {
-            buttons: e.buttons,
-            ctrl: ctrlHeld ? 1 : 0,
-            x: Math.round(x),
-            y: Math.round(y),
-          });
         }
       }
 
@@ -1758,20 +1787,17 @@ export default function App() {
           if (isSlingshotMode.current) {
             const rawDx = (x - mouseAnchorPos.current.x);
             const rawDy = (y - mouseAnchorPos.current.y);
-            const dist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+            const curvedDisplacement = getCurvedSlingshotDisplacement(rawDx, rawDy, 0.25);
+            const dist = curvedDisplacement.dist;
 
             if (dist > 22) isSlingshotCharged.current = true;
-
-            const resistance = 0.25;
-            const finalDx = rawDx * resistance;
-            const finalDy = rawDy * resistance;
 
             if (dist <= SLINGSHOT_DEFENSE_ONLY_MAX_PULL) {
               targetPos.current.x = playerStartPos.current.x;
               targetPos.current.y = playerStartPos.current.y;
             } else {
-              targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + finalDx));
-              targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + finalDy));
+              targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + curvedDisplacement.dx));
+              targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + curvedDisplacement.dy));
             }
           } else {
             const rawDx = (x - mouseAnchorPos.current.x);
@@ -2248,11 +2274,37 @@ export default function App() {
           slingshotTravelUntil.current = 0;
           slingshotLandingTarget.current = null;
         }
-        const lerpFactor = 0.25 * dt;
+        const dx = targetPos.current.x - playerPos.current.x;
+        const dy = targetPos.current.y - playerPos.current.y;
+        const followDist = Math.sqrt(dx * dx + dy * dy);
+        let lerpFactor = PRECISION_FOLLOW_BASE_LERP;
+
+        if (isDragging) {
+          lerpFactor = PRECISION_FOLLOW_DRAG_LERP;
+        }
+        if (followDist > 18) {
+          lerpFactor = Math.max(lerpFactor, PRECISION_FOLLOW_CATCHUP_LERP);
+        }
+        if (followDist > 72) {
+          lerpFactor = PRECISION_FOLLOW_MAX_LERP;
+        }
+        lerpFactor *= dt;
+
         playerPos.current.x += (targetPos.current.x - playerPos.current.x) * lerpFactor;
         playerPos.current.y += (targetPos.current.y - playerPos.current.y) * lerpFactor;
       }
-      playerVel.current = { x: 0, y: 0 };
+      if (isDragging) {
+        playerVel.current = { x: 0, y: 0 };
+      } else {
+        // Keep a short, cheap post-slingshot coast so the ship eases into a stop.
+        const speed = Math.sqrt(playerVel.current.x * playerVel.current.x + playerVel.current.y * playerVel.current.y);
+        if (speed <= PRECISION_COAST_STOP_SPEED) {
+          playerVel.current = { x: 0, y: 0 };
+        } else {
+          playerVel.current.x *= PRECISION_COAST_DAMPING;
+          playerVel.current.y *= PRECISION_COAST_DAMPING;
+        }
+      }
     } else if (isSlingshotMode.current && !isDragging) {
       // Active slingshot drag released but mode still active: pull toward targetPos
       const dx = targetPos.current.x - playerPos.current.x;
@@ -2554,6 +2606,87 @@ export default function App() {
       targetPos.current.x += displacementX;
       targetPos.current.y += displacementY;
     };
+    const dampPlayerVelocityAgainstNormal = (normalX: number, normalY: number) => {
+      const normalVelocity = playerVel.current.x * normalX + playerVel.current.y * normalY;
+      if (normalVelocity < 0) {
+        playerVel.current.x -= normalX * normalVelocity * (1 + SOLID_CONTACT_VELOCITY_DAMPING);
+        playerVel.current.y -= normalY * normalVelocity * (1 + SOLID_CONTACT_VELOCITY_DAMPING);
+      }
+
+      const tangentX = -normalY;
+      const tangentY = normalX;
+      const retainedNormalVelocity = Math.max(0, playerVel.current.x * normalX + playerVel.current.y * normalY);
+      const tangentVelocity = playerVel.current.x * tangentX + playerVel.current.y * tangentY;
+      playerVel.current.x = normalX * retainedNormalVelocity + tangentX * tangentVelocity * SOLID_CONTACT_TANGENT_DAMPING;
+      playerVel.current.y = normalY * retainedNormalVelocity + tangentY * tangentVelocity * SOLID_CONTACT_TANGENT_DAMPING;
+    };
+    const resolvePlayerRectCollision = (rectX: number, rectY: number, rectWidth: number, rectHeight: number, padding = 0) => {
+      const playerLeft = playerPos.current.x;
+      const playerRight = playerPos.current.x + PLAYER_WIDTH;
+      const playerTop = playerPos.current.y;
+      const playerBottom = playerPos.current.y + PLAYER_HEIGHT;
+      const expandedLeft = rectX - padding;
+      const expandedRight = rectX + rectWidth + padding;
+      const expandedTop = rectY - padding;
+      const expandedBottom = rectY + rectHeight + padding;
+
+      if (
+        playerRight <= expandedLeft ||
+        playerLeft >= expandedRight ||
+        playerBottom <= expandedTop ||
+        playerTop >= expandedBottom
+      ) {
+        return false;
+      }
+
+      const overlapLeft = playerRight - expandedLeft;
+      const overlapRight = expandedRight - playerLeft;
+      const overlapTop = playerBottom - expandedTop;
+      const overlapBottom = expandedBottom - playerTop;
+
+      const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+      let displacementX = 0;
+      let displacementY = 0;
+      let normalX = 0;
+      let normalY = 0;
+
+      if (minOverlap === overlapLeft) {
+        displacementX = -overlapLeft;
+        normalX = -1;
+      } else if (minOverlap === overlapRight) {
+        displacementX = overlapRight;
+        normalX = 1;
+      } else if (minOverlap === overlapTop) {
+        displacementY = -overlapTop;
+        normalY = -1;
+      } else {
+        displacementY = overlapBottom;
+        normalY = 1;
+      }
+
+      syncPlayerDragState(displacementX, displacementY);
+      dampPlayerVelocityAgainstNormal(normalX, normalY);
+      return true;
+    };
+    const resolvePlayerCircleCollision = (centerX: number, centerY: number, radius: number, padding = 0) => {
+      const playerCenterX = playerPos.current.x + PLAYER_WIDTH / 2;
+      const playerCenterY = playerPos.current.y + PLAYER_HEIGHT / 2;
+      const dx = playerCenterX - centerX;
+      const dy = playerCenterY - centerY;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+      const minDist = radius + Math.max(PLAYER_WIDTH, PLAYER_HEIGHT) * 0.42 + padding;
+
+      if (dist >= minDist) {
+        return false;
+      }
+
+      const normalX = dx / dist;
+      const normalY = dy / dist;
+      const overlap = minDist - dist;
+      syncPlayerDragState(normalX * overlap, normalY * overlap);
+      dampPlayerVelocityAgainstNormal(normalX, normalY);
+      return true;
+    };
     const applyShieldObstacleRecoil = (
       collision: { centerX: number; centerY: number; dx: number; dy: number; dist: number },
       recoil: number,
@@ -2723,6 +2856,7 @@ export default function App() {
             }
           }
         } else if (overlapsPlayer) {
+          resolvePlayerRectCollision(block.x, block.y, block.width, block.height, 2);
           if (shieldCollision) {
             if (block.type === 'TENTACLE') {
               applyShieldRainTentacleDeflect(block, shieldCollision, 1.2, 4);
@@ -2808,6 +2942,7 @@ export default function App() {
             registerSlingshotCombo(120);
           }
         } else if (doesShieldCatchPoint(a.x, a.y, a.size * 0.5)) {
+          resolvePlayerCircleCollision(a.x, a.y, a.size * 0.5, 2);
           const pushDist = Math.max(1, dist);
           a.vx -= (dx / pushDist) * 6;
           a.vy -= (dy / pushDist) * 6;
@@ -2817,6 +2952,7 @@ export default function App() {
           overdriveGauge.current = Math.max(0, overdriveGauge.current - 8);
           setOverdrive(overdriveGauge.current);
         } else if (Date.now() > invulnerableUntil.current) {
+          resolvePlayerCircleCollision(a.x, a.y, a.size * 0.5, 2);
           handlePlayerHit();
           a.hp = 0; // Destroy on impact
         }
@@ -3007,6 +3143,7 @@ export default function App() {
           }
         }
       } else if (overlapsPlayer && Date.now() > invulnerableUntil.current) {
+        resolvePlayerRectCollision(obs.x, obs.y, obs.width, obs.height, 2);
         if (shieldCollision) {
           playerVel.current.x += (shieldCollision.dx / shieldCollision.dist) * 4;
           playerVel.current.y += (shieldCollision.dy / shieldCollision.dist) * 4;
@@ -4117,16 +4254,17 @@ export default function App() {
           const dx = enemyCenterX - playerCenterX;
           const dy = enemyCenterY - playerCenterY;
           const pushDist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-          const pushStrength = enemy.isBoss ? 8 : enemy.isDiving ? 18 : 12;
+          const wasDiving = enemy.isDiving;
+          const pushStrength = enemy.isBoss ? 8 : wasDiving ? 18 : 12;
           enemy.x += (dx / pushDist) * pushStrength;
           enemy.y += (dy / pushDist) * pushStrength;
           if (!enemy.isBoss) {
-            const stunMs = enemy.isDiving ? SLINGSHOT_SHIELD_DIVE_STUN_MS : SLINGSHOT_SHIELD_STUN_MS;
-            const knockback = enemy.isDiving ? SLINGSHOT_SHIELD_DIVE_KNOCKBACK : SLINGSHOT_SHIELD_KNOCKBACK;
+            const stunMs = wasDiving ? SLINGSHOT_SHIELD_DIVE_STUN_MS : SLINGSHOT_SHIELD_STUN_MS;
+            const knockback = wasDiving ? SLINGSHOT_SHIELD_DIVE_KNOCKBACK : SLINGSHOT_SHIELD_KNOCKBACK;
             enemy.stunnedUntil = Math.max(enemy.stunnedUntil, frameNow + stunMs);
             enemy.knockbackVX = (dx / pushDist) * knockback;
             enemy.knockbackVY = (dy / pushDist) * knockback;
-            if (enemy.isDiving) {
+            if (wasDiving) {
               enemy.isDiving = false;
               enemy.isReturning = true;
               enemy.state = 'RETURNING';
@@ -4139,6 +4277,10 @@ export default function App() {
           const shieldOdCost = enemy.isBoss ? 20 : 12;
           overdriveGauge.current = Math.max(0, overdriveGauge.current - shieldOdCost);
           setOverdrive(overdriveGauge.current);
+          // Player recoil: equal and opposite to the enemy push
+          const shieldRecoilMag = enemy.isBoss ? 8 : wasDiving ? 10 : 6;
+          playerVel.current.x -= (dx / pushDist) * shieldRecoilMag;
+          playerVel.current.y -= (dy / pushDist) * shieldRecoilMag;
       } else if (inPlayerBox) {
           playerHit = true;
       }
