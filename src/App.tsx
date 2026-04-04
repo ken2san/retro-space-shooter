@@ -2954,7 +2954,7 @@ export default function App() {
             !isOverdriveActiveRef.current && frameNow > invulnerableUntil.current) {
           const wcx = block.x + block.width / 2;
           const wcy = block.y + block.height / 2;
-          const armLen = block.height * 0.44;
+          const armLen = block.height * 1.32;
           const pCx = playerPos.current.x + PLAYER_WIDTH / 2;
           const pCy = playerPos.current.y + PLAYER_HEIGHT / 2;
           const wdx = pCx - wcx;
@@ -2998,7 +2998,7 @@ export default function App() {
       blocks.current.forEach(block => {
         if (block.type !== 'TURRET_BLOCK' || block.hp <= 0) return;
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
-        if (now - (block.lastShotTime ?? 0) < 2500) return;
+        if (now - (block.lastShotTime ?? 0) < 1000) return;
         block.lastShotTime = now;
         const cx = block.x + block.width / 2;
         const cy = block.y + block.height / 2;
@@ -5335,8 +5335,8 @@ export default function App() {
         // Rotating blades
         const wcx = block.width / 2;
         const wcy = block.height / 2;
-        // Arms extend beyond the block edge (~14 px) to act as a corridor hazard.
-        const armLen = block.height * 0.44;
+        // Arms extend well beyond block edges to act as a corridor hazard.
+        const armLen = block.height * 1.32;
         const rot = drawNow * 0.00055 + (block.id % 100) * 0.9;
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ffaa';

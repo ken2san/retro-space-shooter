@@ -130,8 +130,8 @@ export const buildWaveEnemies = (
     }
   } else if (stage === 3) {
     // Fewer enemies — Stage 3 is about dodging turret fire and windmill formations
-    for (let i = 0; i < 4; i++) {
-      enemies.push(createEnemy(80 + (i % 4) * 140, 110 + Math.floor(i / 4) * 70, i % 2 === 0 ? 1 : 4));
+    for (let i = 0; i < 2; i++) {
+      enemies.push(createEnemy(80 + i * 280, 110, i % 2 === 0 ? 1 : 4));
     }
     for (let i = 0; i < 2; i++) {
       const turret = createEnemy(150 + i * 200, 220, 1);
