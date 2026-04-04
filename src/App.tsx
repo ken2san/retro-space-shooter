@@ -4733,7 +4733,7 @@ export default function App() {
 
       // Keep spawning enemies if visible threats are low.
       // Off-screen looping enemies should not block fresh spawns.
-      const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : currentStage === 3 ? 4 : 8;
+      const maxEnemies = isAsteroidBelt ? (isMobile ? 4 : 5) : currentStage === 3 ? 3 : 8;
       const visibleEnemyCount = enemies.current.filter((e) =>
         e.alive &&
         !e.isBoss &&
