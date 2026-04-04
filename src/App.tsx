@@ -802,19 +802,22 @@ export default function App() {
       // No destructibles — difficulty comes from navigating formations + turret fire.
       type Slot = null | 'WALL' | 'TURRET_BLOCK' | 'WINDMILL';
       const layouts: Slot[][] = [
-        // Flanking turrets
-        [null, 'WALL', 'TURRET_BLOCK', 'WALL', null, null, 'WALL', 'TURRET_BLOCK', 'WALL', null],
-        // Windmill gate
-        [null, null, 'WINDMILL', null, 'WALL', 'WALL', null, 'WINDMILL', null, null],
-        // Dense sides, turrets in middle
-        ['WALL', 'WALL', null, 'TURRET_BLOCK', null, null, 'TURRET_BLOCK', null, 'WALL', 'WALL'],
-        // Asymmetric windmill + turret
-        [null, 'WINDMILL', null, 'WALL', 'TURRET_BLOCK', null, 'WALL', null, null, null],
+        // PLAYER_WIDTH=50px, blockWidth=60px: single-slot gap (60px) is impassable.
+        // All layouts guarantee at least one 2-consecutive-slot (120px+) clear passage.
+
+        // Flanking turrets — wide centre (4 slots)
+        [null, 'WALL', 'TURRET_BLOCK', null, null, null, null, 'TURRET_BLOCK', 'WALL', null],
+        // Isolated windmill pair — wide corridors on both sides
+        [null, null, 'WINDMILL', null, null, null, null, 'WINDMILL', null, null],
+        // Side walls + turret — two 2-slot passages (slots 2-3 and 5-7)
+        ['WALL', 'WALL', null, null, 'TURRET_BLOCK', null, null, null, 'WALL', 'WALL'],
+        // Asymmetric mix — clear left flank and wide right
+        [null, null, 'WALL', 'WINDMILL', null, null, 'TURRET_BLOCK', null, null, null],
         // Breather rows (weighted 2x)
         [null, null, null, null, null, null, null, null, null, null],
         [null, null, null, null, null, null, null, null, null, null],
-        // One-sided cluster
-        [null, null, 'WALL', 'WINDMILL', 'WALL', null, null, null, null, null],
+        // Centre pair — wide open flanks
+        [null, null, null, null, 'TURRET_BLOCK', 'WINDMILL', null, null, null, null],
       ];
       const layout = layouts[Math.floor(Math.random() * layouts.length)];
       for (let i = 0; i < 10; i++) {
@@ -1092,6 +1095,16 @@ export default function App() {
           integrityRef.current = 100;
           setIntegrity(100);
         }
+      }
+
+      // Dev-only stage jump: Alt+1…5  →  jump to the first wave of that stage
+      if (import.meta.env.DEV && !e.repeat && e.altKey &&
+          ['Digit1','Digit2','Digit3','Digit4','Digit5'].includes(e.code)) {
+        e.preventDefault();
+        const stageNum = parseInt(e.code.replace('Digit', ''));
+        // startNextWave does waveRef.current += 1, so prime it one below the target.
+        waveRef.current = (stageNum - 1) * 2; // wave 1,3,5,7,9 for stages 1-5
+        startNextWave();
       }
 
       // Allow Ctrl to trigger Slingshot Mode during an active drag
@@ -5292,7 +5305,8 @@ export default function App() {
         // Rotating blades
         const wcx = block.width / 2;
         const wcy = block.height / 2;
-        const armLen = Math.min(block.width, block.height) * 0.36;
+        // Arms extend beyond the block edge (~14 px) to act as a corridor hazard.
+        const armLen = block.height * 0.44;
         const rot = drawNow * 0.00055 + (block.id % 100) * 0.9;
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#00ffaa';
