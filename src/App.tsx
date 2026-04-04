@@ -2966,8 +2966,8 @@ export default function App() {
         if (wDist < armLen + PLAYER_WIDTH * 0.4 && wDist > 6) {
           const playerAngle = Math.atan2(wdy, wdx);
           const rot = frameNow * 0.00015 + (block.id % 100) * 0.9;
-          for (let k = 0; k < 4; k++) {
-            const bladeAngle = rot + (k * Math.PI) / 2;
+          for (let k = 0; k < 2; k++) {
+            const bladeAngle = rot + k * Math.PI;
             const diff = Math.abs(normalizeAngle(playerAngle - bladeAngle));
             if (diff < 0.17) {
               if (isSlingshotAttacking) {
@@ -3017,8 +3017,8 @@ export default function App() {
           const dd = ddx * ddx + ddy * ddy;
           if (dd > wbArm * wbArm || dd < 16) return false;
           const bAngle = Math.atan2(ddy, ddx);
-          for (let k = 0; k < 4; k++) {
-            if (Math.abs(normalizeAngle(bAngle - (wbRot + (k * Math.PI) / 2))) < 0.15) return true;
+          for (let k = 0; k < 2; k++) {
+            if (Math.abs(normalizeAngle(bAngle - (wbRot + k * Math.PI))) < 0.15) return true;
           }
           return false;
         };
@@ -5381,8 +5381,8 @@ export default function App() {
         ctx.strokeStyle = '#00ffaa';
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
-        for (let k = 0; k < 4; k++) {
-          const a = rot + (k * Math.PI) / 2;
+        for (let k = 0; k < 2; k++) {
+          const a = rot + k * Math.PI;
           ctx.beginPath();
           ctx.moveTo(wcx, wcy);
           ctx.lineTo(wcx + Math.cos(a) * armLen, wcy + Math.sin(a) * armLen);
