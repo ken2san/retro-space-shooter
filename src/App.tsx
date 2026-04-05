@@ -2868,7 +2868,7 @@ export default function App() {
     // absorption triggers Overdrive immediately.
     // Guard window (post-release) intentionally excluded: absorption requires active drag.
     if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
-      const ENERGY_WALL_BULLET_GAIN = 3; // ~34 bullets to full (was 8 = too fast)
+      const ENERGY_WALL_BULLET_GAIN = 2; // ~50 bullets to full; each of 4 stages = ~12 bullets
       enemyBullets.current = enemyBullets.current.filter(b => {
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
         if (odReadyRef.current) {
@@ -5732,18 +5732,27 @@ export default function App() {
       if (slingshotShieldState.active) {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
-        const wallCharge = Math.min(1, overdriveGauge.current / MAX_OVERDRIVE);
-        // Empty wall: dragging but no energy — arc is dashed and dimmer (absorbing, no physical wall).
-        const isEmptyWall = (isMouseDown.current || isTouching.current) && overdriveGauge.current <= 0;
-        const arcR = Math.round(120 + wallCharge * 135);
-        const arcG = Math.round(255 - wallCharge * 55);
-        const arcB = Math.round(240 - wallCharge * 240);
-        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * (isEmptyWall ? 0.35 : 0.8)})`;
-        ctx.lineWidth = Math.max(6, slingshotShieldState.thickness - 2 + wallCharge * 4);
+        // 5 discrete energy stages (0=empty, 1-4=charging, 5=OD-ready)
+        // Each non-empty stage snaps to a distinct color + thickness for clear readability.
+        const charge = overdriveGauge.current;
+        const stage = charge <= 0 ? 0 : charge < 25 ? 1 : charge < 50 ? 2 : charge < 75 ? 3 : charge < MAX_OVERDRIVE ? 4 : 5;
+        const isEmptyWall = (isMouseDown.current || isTouching.current) && stage === 0;
+        const STAGE_COLORS: [number, number, number][] = [
+          [0,   180, 255],  // 0: empty  — dim cyan
+          [0,   220, 255],  // 1: low    — cyan
+          [0,   255, 200],  // 2: mid    — teal
+          [80,  255, 140],  // 3: high   — green-teal
+          [255, 200,  60],  // 4: near   — amber
+          [255, 200,   0],  // 5: full   — gold
+        ];
+        const STAGE_WIDTHS = [5, 6, 7, 8, 10, 12];
+        const [arcR, arcG, arcB] = STAGE_COLORS[stage];
+        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * (isEmptyWall ? 0.35 : 0.82)})`;
+        ctx.lineWidth = STAGE_WIDTHS[stage];
         if (isEmptyWall) ctx.setLineDash([5, 9]);
         if (!isMobile && renderLoadTierRef.current === 0) {
-          ctx.shadowBlur = 8 + wallCharge * 14;
-          ctx.shadowColor = wallCharge >= 1 ? '#ffcc00' : '#00ffcc';
+          ctx.shadowBlur = 4 + stage * 5;
+          ctx.shadowColor = stage >= 5 ? '#ffcc00' : stage >= 4 ? '#ffcc44' : '#00ffcc';
         }
         ctx.beginPath();
         ctx.arc(0, 0, slingshotShieldState.radius, -Math.PI / 2, Math.PI / 2);
