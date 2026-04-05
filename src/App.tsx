@@ -2988,7 +2988,7 @@ export default function App() {
           if (block.type !== 'WINDMILL') {
             resolvePlayerRectCollision(block.x, block.y, block.width, block.height, 2);
           }
-          if (shieldCollision) {
+          if (shieldCollision && isShieldObstacleRecoilPhase) {
             if (block.type === 'TENTACLE') {
               applyShieldRainTentacleDeflect(block, shieldCollision, 1.2, 4);
             }
@@ -4483,8 +4483,9 @@ export default function App() {
         enemy.y < py + ph &&
         enemy.y + enemy.height > py
       );
-      // Shield arc catches enemies even before they reach the player body
-      const shieldCatch = !isSlingshotAttacking && !isOverdriveActiveRef.current
+      // Shield arc catches enemies even before they reach the player body.
+      // Wall must be active (isShieldObstacleRecoilPhase) — requires energy >= Stage 2 during drag.
+      const shieldCatch = isShieldObstacleRecoilPhase
         && (doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10)
           || doesShieldCatchAtPrev(enemy.x, enemy.y, enemy.width, enemy.height, 10));
       if (!inPlayerBox && !shieldCatch) continue;
