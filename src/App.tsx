@@ -2661,8 +2661,8 @@ export default function App() {
         setOverdrive(overdriveGauge.current);
       }
     };
-    // Option A: guard window (post-release) always acts as wall; during active drag, wall requires energy.
-    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking && (!isDragging || overdriveGauge.current > 0);
+    // Option A: guard window (post-release) always acts as wall; during active drag, wall requires Stage 2+ (gauge >= 25).
+    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking && (!isDragging || overdriveGauge.current >= 25);
     const getShieldObstacleCollision = (x: number, y: number, width: number, height: number, padding = 0) => {
       if (!shieldState.active) return null;
       const caught = doesShieldCatchRect(x, y, width, height, padding) || doesShieldCatchAtPrev(x, y, width, height, padding);
@@ -5736,7 +5736,8 @@ export default function App() {
         // Each non-empty stage snaps to a distinct color + thickness for clear readability.
         const charge = overdriveGauge.current;
         const stage = charge <= 0 ? 0 : charge < 25 ? 1 : charge < 50 ? 2 : charge < 75 ? 3 : charge < MAX_OVERDRIVE ? 4 : 5;
-        const isEmptyWall = (isMouseDown.current || isTouching.current) && stage === 0;
+        // Stages 0-1 (gauge < 25): absorbing but wall not yet solid — show dashed.
+        const isEmptyWall = (isMouseDown.current || isTouching.current) && stage < 2;
         const STAGE_COLORS: [number, number, number][] = [
           [0,   180, 255],  // 0: empty  — dim cyan
           [0,   220, 255],  // 1: low    — cyan
