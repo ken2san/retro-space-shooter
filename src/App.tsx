@@ -2865,7 +2865,8 @@ export default function App() {
     // Energy wall: absorb enemy bullets caught in the shield arc during slingshot drag.
     // Each absorbed bullet charges the OD gauge. When already OD-ready, the first
     // absorption triggers Overdrive immediately.
-    if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current) {
+    // Guard window (post-release) intentionally excluded: absorption requires active drag.
+    if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
       const ENERGY_WALL_BULLET_GAIN = 8;
       enemyBullets.current = enemyBullets.current.filter(b => {
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
