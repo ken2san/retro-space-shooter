@@ -1767,8 +1767,11 @@ export default function App() {
           // If slingshot is currently in-flight OR idle-fire just discharged (<500ms ago),
           // only track cursor position — re-enabling drag would synthesize a false anchor
           // that freezes the ship (anchor=cursor → targetPos=playerPos).
+          // Roll lastIdleFireAt while attack is still active so the 500ms grace window
+          // starts from attack-end, not from idle-fire time (covers long-pull attacks).
           if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now || now - lastIdleFireAt.current < 500) {
             currentMousePos.current = { x, y };
+            if (slingshotAttackUntil.current > now) lastIdleFireAt.current = now;
           } else {
             isMouseDown.current = true;
             isVirtualDragActive.current = false;
