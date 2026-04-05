@@ -243,6 +243,24 @@ Ship a stable, deployable build to Firebase Hosting.
 
 Active phase: **Phase 5 (Release)**
 
+### Experimental Branch: `slingshot/energy-wall`
+
+Prototype for revised Overdrive flow via bullet absorption.
+
+**Design:**
+- Slingshot drag → enemy bullets caught in shield arc are absorbed → OD gauge charges
+- OD gauge reaches MAX → OD-Ready state (gold orbit ring on ship)
+- While OD-Ready, absorb one more bullet → Overdrive activates
+- OD activation resets gauge to 0
+- Shield arc color shifts cyan → gold as charge increases (visual gauge replacement candidate)
+
+**Status:** Implemented, not merged. Under evaluation.
+
+**Adoption gates:**
+- Fun/readability improves in playtest
+- No fairness regression (OD now skill-gated via absorption, not auto-triggered on hit)
+- Build passes (✅ confirmed 2026-04-05)
+
 ### Immediate Next Validation
 
 - Re-run fixed 60s perf captures on boss-heavy windows and compare p95 frame time against prior baseline

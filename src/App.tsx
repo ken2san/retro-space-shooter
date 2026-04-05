@@ -254,6 +254,7 @@ export default function App() {
   const repairDropsDuringBossRef = useRef(0);
   const activeEffects = useRef<Record<string, number>>({});
   const overdriveGauge = useRef(0);
+  const odReadyRef = useRef(false);
   const [overdrive, setOverdrive] = useState(0);
   const [isOverdriveActive, setIsOverdriveActive] = useState(false);
   const isOverdriveActiveRef = useRef(false);
@@ -2005,6 +2006,9 @@ export default function App() {
   };
 
   const activateOverdrive = () => {
+    overdriveGauge.current = 0;
+    setOverdrive(0);
+    odReadyRef.current = false;
     isOverdriveActiveRef.current = true;
     setIsOverdriveActive(true);
     const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
@@ -2636,6 +2640,7 @@ export default function App() {
       return aoff <= SLINGSHOT_SHIELD_HALF_ARC && ddist >= inner && ddist <= outer;
     };
     const isSlingshotAttacking = frameNow < slingshotAttackUntil.current;
+    odReadyRef.current = overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current;
     const registerSlingshotCombo = (basePoints: number) => {
       if (!isSlingshotAttacking) return;
 
@@ -2856,6 +2861,28 @@ export default function App() {
       setOverdrive(overdriveGauge.current);
       isSnapping.current = Math.max(isSnapping.current, 5);
     };
+
+    // Energy wall: absorb enemy bullets caught in the shield arc during slingshot drag.
+    // Each absorbed bullet charges the OD gauge. When already OD-ready, the first
+    // absorption triggers Overdrive immediately.
+    if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current) {
+      const ENERGY_WALL_BULLET_GAIN = 8;
+      enemyBullets.current = enemyBullets.current.filter(b => {
+        if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
+        if (odReadyRef.current) {
+          activateOverdrive();
+          return false;
+        }
+        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
+        setOverdrive(overdriveGauge.current);
+        if (overdriveGauge.current >= MAX_OVERDRIVE) {
+          flash.current = Math.max(flash.current, 0.25);
+        }
+        createExplosion(b.x, b.y, '#ffcc00', 2);
+        return false;
+      });
+      odReadyRef.current = overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current;
+    }
 
     // Slingshot bullet wake: push nearby enemy bullets outward while the player is in flight.
     // Bullets are deflected (not destroyed) — they scatter sideways, creating visible lanes.
@@ -5659,6 +5686,25 @@ export default function App() {
         ctx.restore();
       }
 
+      // OD-Ready: gold orbit ring — absorb one more bullet to trigger Overdrive
+      if (odReadyRef.current && !isOverdriveActiveRef.current) {
+        ctx.save();
+        const pulse = Math.sin(Date.now() * 0.006) * 0.5 + 0.5;
+        ctx.strokeStyle = `rgba(255, 204, 0, ${0.7 + pulse * 0.3})`;
+        ctx.lineWidth = 2.5;
+        if (!isMobile) { ctx.shadowBlur = 20; ctx.shadowColor = '#ffcc00'; }
+        ctx.beginPath();
+        ctx.arc(0, 0, 50 + pulse * 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([6, 8]);
+        ctx.rotate(Date.now() * 0.003);
+        ctx.strokeStyle = `rgba(255, 180, 0, ${0.5 + pulse * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, 44, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // High-End Neon Vector Ship
       drawShipVector(ctx);
 
@@ -5684,11 +5730,15 @@ export default function App() {
       if (slingshotShieldState.active) {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
-        ctx.strokeStyle = `rgba(120, 255, 240, ${slingshotShieldState.alpha * 0.8})`;
-        ctx.lineWidth = Math.max(6, slingshotShieldState.thickness - 2);
+        const wallCharge = Math.min(1, overdriveGauge.current / MAX_OVERDRIVE);
+        const arcR = Math.round(120 + wallCharge * 135);
+        const arcG = Math.round(255 - wallCharge * 55);
+        const arcB = Math.round(240 - wallCharge * 240);
+        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * 0.8})`;
+        ctx.lineWidth = Math.max(6, slingshotShieldState.thickness - 2 + wallCharge * 4);
         if (!isMobile && renderLoadTierRef.current === 0) {
-          ctx.shadowBlur = 8;
-          ctx.shadowColor = '#00ffcc';
+          ctx.shadowBlur = 8 + wallCharge * 14;
+          ctx.shadowColor = wallCharge >= 1 ? '#ffcc00' : '#00ffcc';
         }
         ctx.beginPath();
         ctx.arc(0, 0, slingshotShieldState.radius, -Math.PI / 2, Math.PI / 2);
