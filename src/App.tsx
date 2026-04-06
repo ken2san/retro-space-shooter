@@ -563,7 +563,7 @@ export default function App() {
     setXp(xpRef.current);
     setXpToNextLevel(xpToNextLevelRef.current);
 
-    if (progress.didLevelUp) {
+    if (progress.didLevelUp && !victoryPendingRef.current) {
       triggerLevelUp();
     }
 
