@@ -20,7 +20,6 @@ export const RELIC_OPTIONS: UpgradeOption[] = [
   { id: 'FRENZY', label: 'Overdrive Sync', desc: 'Overdrive lasts 50% longer.' },
   { id: 'CHRONO', label: 'Chrono-Trigger', desc: 'Chance to slow time on enemy kill.' },
   { id: 'EMP', label: 'EMP Burst', desc: 'Chance to stun enemies on hit.' },
-  { id: 'FOLLOWER', label: 'Energy Follower', desc: 'Deploy a chain of defensive energy pods.' },
 ];
 
 export const RELIC_LABELS: Record<string, string> = {
@@ -32,7 +31,6 @@ export const RELIC_LABELS: Record<string, string> = {
   FRENZY: 'Overdrive Sync',
   CHRONO: 'Chrono-Trigger',
   EMP: 'EMP Burst',
-  FOLLOWER: 'Energy Follower',
 };
 
 export const pickRandomOptions = (options: UpgradeOption[], count: number): UpgradeOption[] => {

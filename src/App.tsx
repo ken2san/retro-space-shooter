@@ -234,6 +234,9 @@ export default function App() {
   const lastInputDebugSnapshotRef = useRef('');
   // Idle-fire: fire slingshot when mousemove stops (finger lifted on trackpad before OS sends mouseup)
   const idleFireTimer = useRef<number | null>(null);
+  // Timestamp of the last idle-fire discharge — used to suppress phantom drag
+  // re-synthesis in mouse-down-missed-detected for 500ms after idle-fire.
+  const lastIdleFireAt = useRef(0);
   const slingshotAttackUntil = useRef(0);
   const slingshotTravelUntil = useRef(0);
   // Short-lived guard (~400ms) to block the phantom mousedown macOS sends
@@ -254,6 +257,7 @@ export default function App() {
   const repairDropsDuringBossRef = useRef(0);
   const activeEffects = useRef<Record<string, number>>({});
   const overdriveGauge = useRef(0);
+  const odReadyRef = useRef(false);
   const [overdrive, setOverdrive] = useState(0);
   const [isOverdriveActive, setIsOverdriveActive] = useState(false);
   const isOverdriveActiveRef = useRef(false);
@@ -546,12 +550,6 @@ export default function App() {
     setXp(xpRef.current);
     setXpToNextLevel(xpToNextLevelRef.current);
 
-    // Give Overdrive fuel on scrap collection
-    if (!isOverdriveActiveRef.current) {
-      overdriveGauge.current = Math.min(100, overdriveGauge.current + 2);
-      setOverdrive(overdriveGauge.current);
-    }
-
     if (progress.didLevelUp) {
       triggerLevelUp();
     }
@@ -749,11 +747,11 @@ export default function App() {
       case 'EMP': /* Handled in hit logic */ break;
       case 'FRENZY': /* Handled in overdrive logic */ break;
       case 'FOLLOWER':
-        hasFollowerRef.current = true;
-        // Pre-fill history to avoid jump
-        const startX = wingmanRef.current ? wingmanPos.current.x + PLAYER_WIDTH / 2 : playerPos.current.x + PLAYER_WIDTH / 2;
-        const startY = wingmanRef.current ? wingmanPos.current.y + PLAYER_HEIGHT / 2 : playerPos.current.y + PLAYER_HEIGHT / 2;
-        followerHistory.current = Array(200).fill({ x: startX, y: startY });
+        // Disabled: Follower Pods are too expensive on mobile — re-enable when optimized.
+        // hasFollowerRef.current = true;
+        // const startX = wingmanRef.current ? wingmanPos.current.x + PLAYER_WIDTH / 2 : playerPos.current.x + PLAYER_WIDTH / 2;
+        // const startY = wingmanRef.current ? wingmanPos.current.y + PLAYER_HEIGHT / 2 : playerPos.current.y + PLAYER_HEIGHT / 2;
+        // followerHistory.current = Array(200).fill({ x: startX, y: startY });
         break;
       case 'WINGMAN':
         setHasWingman(true);
@@ -1766,11 +1764,14 @@ export default function App() {
           const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
           const now = Date.now();
 
-          // If slingshot is currently in-flight (idleFireTimer fired and cleared isMouseDown),
-          // only track cursor position — re-enabling drag would cause the upcoming mouseup
-          // to call handleSlingshot again and abort the flight via slingshotTravelUntil reset.
-          if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now) {
+          // If slingshot is currently in-flight OR idle-fire just discharged (<500ms ago),
+          // only track cursor position — re-enabling drag would synthesize a false anchor
+          // that freezes the ship (anchor=cursor → targetPos=playerPos).
+          // Roll lastIdleFireAt while attack is still active so the 500ms grace window
+          // starts from attack-end, not from idle-fire time (covers long-pull attacks).
+          if (slingshotTravelUntil.current > now || slingshotAttackUntil.current > now || now - lastIdleFireAt.current < 500) {
             currentMousePos.current = { x, y };
+            if (slingshotAttackUntil.current > now) lastIdleFireAt.current = now;
           } else {
             isMouseDown.current = true;
             isVirtualDragActive.current = false;
@@ -1850,6 +1851,7 @@ export default function App() {
               isVirtualDragActive.current = false;
               isMouseDown.current = false;
               mouseAnchorPos.current = null;
+              lastIdleFireAt.current = Date.now();
             }
             idleFireTimer.current = null;
           }, 80);
@@ -1979,12 +1981,6 @@ export default function App() {
       grazeCount.current++;
       setScore(s => s + 10);
 
-      // Boost overdrive
-      if (!isOverdriveActiveRef.current) {
-        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 0.5);
-        setOverdrive(overdriveGauge.current);
-      }
-
     // Slow motion effect
     timeScale.current = 0.8;
 
@@ -2005,6 +2001,9 @@ export default function App() {
   };
 
   const activateOverdrive = () => {
+    overdriveGauge.current = 0;
+    setOverdrive(0);
+    odReadyRef.current = false;
     isOverdriveActiveRef.current = true;
     setIsOverdriveActive(true);
     const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
@@ -2021,12 +2020,26 @@ export default function App() {
   // Game Loop
   const update = () => {
     // Hit stop logic
-    if (Date.now() < hitStopTimer.current) return;
+    const now = Date.now();
+    if (now < hitStopTimer.current) return;
 
     const dt = dtRef.current;
     const simulationTier = simulationLoadTierRef.current;
     const isReducedSim = simulationTier >= 1;
     const isCriticalSim = simulationTier >= 2;
+
+    // Cache frequently used .current arrays for performance
+    const enemiesArr = enemies.current;
+    const bulletsArr = bullets.current;
+    const enemyBulletsArr = enemyBullets.current;
+    const blocksArr = blocks.current;
+    const asteroidsArr = asteroids.current;
+    const particlesArr = particles.current;
+    const powerUpsArr = powerUps.current;
+    const scrapsArr = scraps.current;
+    const dronesArr = drones.current;
+    const trailsArr = trails.current;
+    const damageNumbersArr = damageNumbers.current;
 
     // Warp logic should run even if not in PLAYING state (e.g. STAGE_CLEAR)
     if (isWarping.current) {
@@ -2063,8 +2076,14 @@ export default function App() {
 
     if (gameState !== 'PLAYING' || showUpgrade) return;
 
+    // Cache relic lookups — avoids O(n × relics) cost inside enemy/bullet loops
+    const hasEMP        = relicsRef.current.some(r => r.id === 'EMP');
+    const hasChrono     = relicsRef.current.some(r => r.id === 'CHRONO');
+    const hasFrenzy     = relicsRef.current.some(r => r.id === 'FRENZY');
+    const hasShieldRegen = relicsRef.current.some(r => r.id === 'SHIELD_REGEN');
+
     // Input watchdog: recover from macOS gesture paths that leave drag flags stuck.
-    const watchdogNow = Date.now();
+    const watchdogNow = now;
     if (lastInputActivityAt.current > 0) {
       const idleMs = watchdogNow - lastInputActivityAt.current;
       const staleVirtualDrag = isVirtualDragActive.current && idleMs > INPUT_WATCHDOG_RELEASE_MS;
@@ -2102,11 +2121,18 @@ export default function App() {
     }
 
     // Keep object counts within a soft budget when frame time worsens.
-    if (enemyBullets.current.length > (isCriticalSim ? 140 : isReducedSim ? 200 : 260)) {
-      enemyBullets.current.splice(0, enemyBullets.current.length - (isCriticalSim ? 140 : isReducedSim ? 200 : 260));
+    // Mobile caps are tighter to match MAX_ENEMY_BULLETS / MAX_PARTICLES constants.
+    const enemyBulletCap = isMobile
+      ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
+      : (isCriticalSim ? 140 : isReducedSim ? 200 : 260);
+    if (enemyBullets.current.length > enemyBulletCap) {
+      enemyBullets.current.splice(0, enemyBullets.current.length - enemyBulletCap);
     }
-    if (particles.current.length > (isCriticalSim ? 520 : isReducedSim ? 760 : 1000)) {
-      particles.current.splice(0, particles.current.length - (isCriticalSim ? 520 : isReducedSim ? 760 : 1000));
+    const particleCap = isMobile
+      ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
+      : (isCriticalSim ? 520 : isReducedSim ? 760 : 1000);
+    if (particles.current.length > particleCap) {
+      particles.current.splice(0, particles.current.length - particleCap);
     }
 
     const isAsteroidBelt = currentStage === 2;
@@ -2125,14 +2151,14 @@ export default function App() {
     }
 
     // SHIELD_REGEN: auto-recharge shield every 20s when consumed
-    if (relicsRef.current.some(r => r.id === 'SHIELD_REGEN')) {
-      const now = Date.now();
-      const shieldActive = activeEffects.current['SHIELD'] > now;
+    if (hasShieldRegen) {
+      const shieldNow = Date.now();
+      const shieldActive = activeEffects.current['SHIELD'] > shieldNow;
       if (!shieldActive) {
         if (!activeEffects.current['SHIELD_RECHARGE']) {
-          activeEffects.current['SHIELD_RECHARGE'] = now + 20000;
-        } else if (now > activeEffects.current['SHIELD_RECHARGE']) {
-          activeEffects.current['SHIELD'] = now + 10000;
+          activeEffects.current['SHIELD_RECHARGE'] = shieldNow + 20000;
+        } else if (shieldNow > activeEffects.current['SHIELD_RECHARGE']) {
+          activeEffects.current['SHIELD'] = shieldNow + 10000;
           activeEffects.current['SHIELD_RECHARGE'] = 0;
         }
       } else {
@@ -2205,8 +2231,8 @@ export default function App() {
 
       // Wingman firing
       if (gameState === 'PLAYING') {
-        const now = Date.now();
-        if (now - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
+        const wingmanNow = Date.now();
+        if (wingmanNow - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
           bullets.current.push({
             x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
             y: wingmanPos.current.y,
@@ -2477,9 +2503,9 @@ export default function App() {
     const isMoving = Math.abs(targetPos.current.x - playerPos.current.x) > 0.1 || Math.abs(targetPos.current.y - playerPos.current.y) > 0.1;
 
     // Add trail
-    const now = Date.now();
-    if (isMoving && now - lastTrailSpawnAt.current > VFX_TRAIL_SPAWN_INTERVAL_MS && trails.current.length < MAX_TRAILS) {
-      lastTrailSpawnAt.current = now;
+    const trailNow = Date.now();
+    if (isMoving && trailNow - lastTrailSpawnAt.current > VFX_TRAIL_SPAWN_INTERVAL_MS && trails.current.length < MAX_TRAILS) {
+      lastTrailSpawnAt.current = trailNow;
       trails.current.push({
         x: playerPos.current.x + PLAYER_WIDTH / 2,
         y: playerPos.current.y + PLAYER_HEIGHT / 2,
@@ -2636,6 +2662,7 @@ export default function App() {
       return aoff <= SLINGSHOT_SHIELD_HALF_ARC && ddist >= inner && ddist <= outer;
     };
     const isSlingshotAttacking = frameNow < slingshotAttackUntil.current;
+    odReadyRef.current = overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current;
     const registerSlingshotCombo = (basePoints: number) => {
       if (!isSlingshotAttacking) return;
 
@@ -2656,7 +2683,8 @@ export default function App() {
         setOverdrive(overdriveGauge.current);
       }
     };
-    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking;
+    // Wall (enemy/block deflect) always requires Stage 2+ (gauge >= 25), both during drag and guard window.
+    const isShieldObstacleRecoilPhase = shieldState.active && !isSlingshotAttacking && overdriveGauge.current >= 25;
     const getShieldObstacleCollision = (x: number, y: number, width: number, height: number, padding = 0) => {
       if (!shieldState.active) return null;
       const caught = doesShieldCatchRect(x, y, width, height, padding) || doesShieldCatchAtPrev(x, y, width, height, padding);
@@ -2857,6 +2885,29 @@ export default function App() {
       isSnapping.current = Math.max(isSnapping.current, 5);
     };
 
+    // Energy wall: absorb enemy bullets caught in the shield arc during slingshot drag.
+    // Each absorbed bullet charges the OD gauge. When already OD-ready, the first
+    // absorption triggers Overdrive immediately.
+    // Guard window (post-release) intentionally excluded: absorption requires active drag.
+    if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
+      const ENERGY_WALL_BULLET_GAIN = 2; // ~50 bullets to full; each of 4 stages = ~12 bullets
+      enemyBullets.current = enemyBullets.current.filter(b => {
+        if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
+        if (odReadyRef.current) {
+          activateOverdrive();
+          return false;
+        }
+        overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
+        setOverdrive(overdriveGauge.current);
+        if (overdriveGauge.current >= MAX_OVERDRIVE) {
+          flash.current = Math.max(flash.current, 0.25);
+        }
+        createExplosion(b.x, b.y, '#ffcc00', 2);
+        return false;
+      });
+      odReadyRef.current = overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current;
+    }
+
     // Slingshot bullet wake: push nearby enemy bullets outward while the player is in flight.
     // Bullets are deflected (not destroyed) — they scatter sideways, creating visible lanes.
     if (isSlingshotAttacking) {
@@ -2959,7 +3010,7 @@ export default function App() {
           if (block.type !== 'WINDMILL') {
             resolvePlayerRectCollision(block.x, block.y, block.width, block.height, 2);
           }
-          if (shieldCollision) {
+          if (shieldCollision && isShieldObstacleRecoilPhase) {
             if (block.type === 'TENTACLE') {
               applyShieldRainTentacleDeflect(block, shieldCollision, 1.2, 4);
             }
@@ -3411,7 +3462,6 @@ export default function App() {
         shake.current = 10;
         audio.playPowerDown(); // Add a sound for ending
       } else {
-        const hasFrenzy = relicsRef.current.some(r => r.id === 'FRENZY');
         const totalDuration = hasFrenzy ? 15000 : 10000;
         const elapsed = totalDuration - (overdriveEndTime.current - now);
         const remainingPercent = Math.max(0, 100 - (elapsed / totalDuration) * 100);
@@ -4048,7 +4098,8 @@ export default function App() {
 
     // Final Separation Pass (Post-movement)
     // This ensures enemies don't overlap even if their formulas try to put them in the same spot
-    enemies.current.forEach((enemy) => {
+    // On mobile, run every other frame — visual difference is imperceptible; saves O(n²) work.
+    if (!isMobile || frameCounterRef.current % 2 === 0) enemies.current.forEach((enemy) => {
       if (!enemy.alive || enemy.state === 'ENTERING' || enemy.isBoss) return;
 
       enemies.current.forEach((other) => {
@@ -4254,7 +4305,7 @@ export default function App() {
           hitStopTimer.current = Date.now() + 33;
 
           // EMP Burst
-          if (relicsRef.current.some(r => r.id === 'EMP') && Math.random() < 0.1) {
+          if (hasEMP && Math.random() < 0.1) {
             enemy.stunnedUntil = Date.now() + 2000;
             createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff3366', 10);
           }
@@ -4270,7 +4321,7 @@ export default function App() {
               enemy.alive = false;
 
               // Chrono Trigger
-              if (relicsRef.current.some(r => r.id === 'CHRONO') && !isOverdriveActiveRef.current && Math.random() < 0.15) {
+              if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
                 timeScale.current = 0.3;
               }
 
@@ -4303,12 +4354,6 @@ export default function App() {
                 });
               }
 
-              // Overdrive gauge increase
-              if (!isOverdriveActiveRef.current) {
-                overdriveGauge.current = Math.min(100, overdriveGauge.current + 12);
-                setOverdrive(overdriveGauge.current);
-              }
-
               // Big explosion
               createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, '#ff33cc', 100);
               shake.current = 30;
@@ -4336,7 +4381,7 @@ export default function App() {
           }
 
           // Chrono Trigger
-          if (relicsRef.current.some(r => r.id === 'CHRONO') && !isOverdriveActiveRef.current && Math.random() < 0.15) {
+          if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
             timeScale.current = 0.3;
           }
           playerBullets.splice(i, 1);
@@ -4369,14 +4414,6 @@ export default function App() {
           const basePoints = enemy.isDiving ? 250 : 100;
           const comboBonus = Math.floor(basePoints * (comboRef.current - 1) * 0.1);
           setScore((s) => s + basePoints + comboBonus);
-
-          // Overdrive gauge increase
-          if (!isOverdriveActiveRef.current) {
-            const stageGainScale = Math.min(1.25, 1 + waveRef.current * 0.02);
-            const gaugeGain = (enemy.isDiving ? 2.2 : 0.9) * stageGainScale;
-            overdriveGauge.current = Math.min(100, overdriveGauge.current + gaugeGain);
-            setOverdrive(overdriveGauge.current);
-          }
 
           // Emergency repair drop: low chance, cooldown-gated, with low-HP bias.
           if (integrityRef.current < 100) {
@@ -4454,8 +4491,9 @@ export default function App() {
         enemy.y < py + ph &&
         enemy.y + enemy.height > py
       );
-      // Shield arc catches enemies even before they reach the player body
-      const shieldCatch = !isSlingshotAttacking && !isOverdriveActiveRef.current
+      // Shield arc catches enemies even before they reach the player body.
+      // Wall must be active (isShieldObstacleRecoilPhase) — requires energy >= Stage 2 during drag.
+      const shieldCatch = isShieldObstacleRecoilPhase
         && (doesShieldCatchRect(enemy.x, enemy.y, enemy.width, enemy.height, 10)
           || doesShieldCatchAtPrev(enemy.x, enemy.y, enemy.width, enemy.height, 10));
       if (!inPlayerBox && !shieldCatch) continue;
@@ -5659,6 +5697,25 @@ export default function App() {
         ctx.restore();
       }
 
+      // OD-Ready: gold orbit ring — absorb one more bullet to trigger Overdrive
+      if (odReadyRef.current && !isOverdriveActiveRef.current) {
+        ctx.save();
+        const pulse = Math.sin(Date.now() * 0.006) * 0.5 + 0.5;
+        ctx.strokeStyle = `rgba(255, 204, 0, ${0.7 + pulse * 0.3})`;
+        ctx.lineWidth = 2.5;
+        if (!isMobile) { ctx.shadowBlur = 20; ctx.shadowColor = '#ffcc00'; }
+        ctx.beginPath();
+        ctx.arc(0, 0, 50 + pulse * 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([6, 8]);
+        ctx.rotate(Date.now() * 0.003);
+        ctx.strokeStyle = `rgba(255, 180, 0, ${0.5 + pulse * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, 44, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // High-End Neon Vector Ship
       drawShipVector(ctx);
 
@@ -5684,11 +5741,31 @@ export default function App() {
       if (slingshotShieldState.active) {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
-        ctx.strokeStyle = `rgba(120, 255, 240, ${slingshotShieldState.alpha * 0.8})`;
-        ctx.lineWidth = Math.max(6, slingshotShieldState.thickness - 2);
+        // 5 discrete energy stages (0=empty, 1-4=charging, 5=OD-ready)
+        // Each non-empty stage snaps to a distinct color + thickness for clear readability.
+        const charge = overdriveGauge.current;
+        const stage = charge <= 0 ? 0 : charge < 25 ? 1 : charge < 50 ? 2 : charge < 75 ? 3 : charge < MAX_OVERDRIVE ? 4 : 5;
+        // Stages 0-1 (gauge < 25): wall not yet active — show dashed orange-red.
+        // Covers both active drag and guard window so dashed visual matches gameplay (no deflect).
+        const isDraggingNow = isMouseDown.current || isTouching.current;
+        const isInGuardWindow = !isDraggingNow && Date.now() < slingshotGuardUntil.current;
+        const isEmptyWall = (isDraggingNow || isInGuardWindow) && stage < 2;
+        const STAGE_COLORS: [number, number, number][] = [
+          [255,  90,  30],  // 0: empty  — red-orange (no wall, not charging)
+          [255, 160,  40],  // 1: low    — orange (charging, wall not yet active)
+          [0,   255, 200],  // 2: mid    — teal (wall active)
+          [80,  255, 140],  // 3: high   — green-teal
+          [255, 200,  60],  // 4: near   — amber
+          [255, 200,   0],  // 5: full   — gold
+        ];
+        const STAGE_WIDTHS = [5, 6, 7, 8, 10, 12];
+        const [arcR, arcG, arcB] = STAGE_COLORS[stage];
+        ctx.strokeStyle = `rgba(${arcR}, ${arcG}, ${arcB}, ${slingshotShieldState.alpha * (isEmptyWall ? 0.45 : 0.82)})`;
+        ctx.lineWidth = STAGE_WIDTHS[stage];
+        if (isEmptyWall) ctx.setLineDash([5, 9]);
         if (!isMobile && renderLoadTierRef.current === 0) {
-          ctx.shadowBlur = 8;
-          ctx.shadowColor = '#00ffcc';
+          ctx.shadowBlur = 4 + stage * 5;
+          ctx.shadowColor = stage >= 5 ? '#ffcc00' : stage >= 4 ? '#ffcc44' : stage >= 2 ? '#00ffcc' : '#ff8020';
         }
         ctx.beginPath();
         ctx.arc(0, 0, slingshotShieldState.radius, -Math.PI / 2, Math.PI / 2);
@@ -6572,6 +6649,14 @@ export default function App() {
 
     const now = Date.now();
     const elapsed = now - lastTimeRef.current;
+
+    // Cap at 60fps on mobile (ProMotion devices fire rAF at 120Hz, doubling CPU/GPU load).
+    // Skip the frame but re-queue immediately — keeps animation smooth without doing double work.
+    if (isMobile && elapsed < 14) {
+      requestRef.current = requestAnimationFrame(loop);
+      return;
+    }
+
     lastTimeRef.current = now;
     const boundedElapsed = Math.max(1, Math.min(1000, elapsed));
     // Normalize to 60fps (16.67ms per frame)
@@ -6616,13 +6701,14 @@ export default function App() {
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
+      // Mobile escalates earlier: 30fps (33ms) triggers tier 1, 24fps (42ms) triggers tier 2.
       if (isFinalLaserBossActive) {
-        if (p95Frame > 40) nextSimulationTier = 2;
-        else if (p95Frame > 30) nextSimulationTier = 1;
-        else if (p95Frame < 24) nextSimulationTier = 0;
-      } else if (p95Frame > 50) nextSimulationTier = 2;
-      else if (p95Frame > 38) nextSimulationTier = 1;
-      else if (p95Frame < 28) nextSimulationTier = 0;
+        if (p95Frame > (isMobile ? 35 : 40)) nextSimulationTier = 2;
+        else if (p95Frame > (isMobile ? 28 : 30)) nextSimulationTier = 1;
+        else if (p95Frame < (isMobile ? 22 : 24)) nextSimulationTier = 0;
+      } else if (p95Frame > (isMobile ? 42 : 50)) nextSimulationTier = 2;
+      else if (p95Frame > (isMobile ? 33 : 38)) nextSimulationTier = 1;
+      else if (p95Frame < (isMobile ? 26 : 28)) nextSimulationTier = 0;
       simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
@@ -6638,6 +6724,13 @@ export default function App() {
     }
 
     if (ctx) {
+      // On mobile, throttle draw-only frames (non-PLAYING states) to ~30fps to save battery.
+      const isIdleState = gameState !== 'PLAYING';
+      if (isMobile && isIdleState && frameCounterRef.current % 2 !== 0) {
+        requestRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
       if (Date.now() < hitStopTimer.current) {
         draw(ctx);
       } else {

@@ -101,26 +101,38 @@ export default function GameHud({
 
           <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-3">
-              <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black">Overdrive</span>
-              <div className="w-28 md:w-36 h-2.5 md:h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-px relative transition-all">
-                <motion.div
-                  animate={overdrive >= maxOverdrive && !isOverdriveActive
-                    ? {
-                        width: '100%',
-                        backgroundColor: ['#ff3366', '#ff336633', '#ff3366'],
-                      }
-                    : {
-                        width: `${(overdrive / maxOverdrive) * 100}%`,
-                        backgroundColor: isOverdriveActive ? '#ff3366' : '#00ffcc',
-                      }
-                  }
-                  transition={overdrive >= maxOverdrive && !isOverdriveActive
-                    ? { duration: 0.5, repeat: Infinity }
-                    : { duration: 0.3 }
-                  }
-                  className="h-full rounded-full shadow-[0_0_20px_rgba(255,51,102,0.6)]"
-                />
-              </div>
+              {(() => {
+                const odReady = overdrive >= maxOverdrive && !isOverdriveActive;
+                const wallActive = overdrive >= 25 && !isOverdriveActive && !odReady;
+                const label = isOverdriveActive ? 'Overdrive' : odReady ? 'OD Ready' : wallActive ? 'Wall Active' : 'Energy';
+                const labelColor = isOverdriveActive ? 'text-[#ff3366]' : odReady ? 'text-[#ffcc00]' : wallActive ? 'text-[#00ffcc]' : 'text-[#ff8820]';
+                const barColor = isOverdriveActive ? '#ff3366' : odReady ? undefined : wallActive ? '#00ffcc' : '#ff8820';
+                const thresholdPct = (25 / maxOverdrive) * 100;
+                return (
+                  <>
+                    <span className={`text-[8px] uppercase tracking-widest font-black transition-colors duration-300 ${labelColor}`}>{label}</span>
+                    <div className="w-28 md:w-36 relative">
+                      {/* Wall activation threshold marker */}
+                      {!isOverdriveActive && (
+                        <div
+                          className="absolute -top-0.5 -bottom-0.5 w-px z-10 pointer-events-none"
+                          style={{ left: `${thresholdPct}%`, backgroundColor: overdrive >= 25 ? 'rgba(0,255,204,0.5)' : 'rgba(255,255,255,0.35)' }}
+                        />
+                      )}
+                      <div className="h-2.5 md:h-3 bg-black/40 rounded-full overflow-hidden border border-white/10 p-px">
+                        <motion.div
+                          animate={odReady
+                            ? { width: '100%', backgroundColor: ['#ff3366', '#ff336633', '#ff3366'] }
+                            : { width: `${(overdrive / maxOverdrive) * 100}%`, backgroundColor: barColor ?? '#ff3366' }
+                          }
+                          transition={odReady ? { duration: 0.5, repeat: Infinity } : { duration: 0.3 }}
+                          className="h-full rounded-full shadow-[0_0_20px_rgba(255,51,102,0.6)]"
+                        />
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
