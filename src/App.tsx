@@ -2972,7 +2972,10 @@ export default function App() {
     }
 
     // Maze Generation (Canyon)
-    const scrollSpeed = (currentStage === 3 ? 0.65 : 3) * worldSpeedScale;
+    // Stage 3: slow (windmill/turret choreography needs read time)
+    // Stage 4: moderate (canyon chase — faster than S3, but corridors must stay readable)
+    // Stage 5+: fast (boss wave, obstacles are background pressure not puzzle)
+    const scrollSpeed = (currentStage === 3 ? 0.65 : currentStage === 4 ? 1.4 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
     // Stage 5 spawns rows half as often — high scroll speed already brings blocks fast enough.
     const rowSpawnThreshold = currentStage === 5 ? 200 : 100;
