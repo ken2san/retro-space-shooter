@@ -3868,7 +3868,9 @@ export default function App() {
           } else if (enemy.bossType === BossType.LASER) {
             // Final Front laser boss: slower rotation and tighter hit width for fairer reads.
             const laserRotationSpeed = enemy.phase === 3 ? 0.72 : enemy.phase === 2 ? 0.58 : 0.46;
-            const loadAdjustedRotationSpeed = isCriticalSim ? laserRotationSpeed * 0.72 : isReducedSim ? laserRotationSpeed * 0.84 : laserRotationSpeed;
+            // Final Front laser boss: dt-scaled timer is already frame-rate independent;
+            // rotation speed is not load-tier-gated so mobile and desktop feel the same.
+            const loadAdjustedRotationSpeed = laserRotationSpeed;
             enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current * loadAdjustedRotationSpeed;
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
             const laserCount = enemy.phase === 3 ? 4 : 2;
@@ -5432,8 +5434,11 @@ export default function App() {
       ctx.translate(block.x, block.y);
 
       const color = block.color;
-      ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15) * shadowScale;
-      ctx.shadowColor = color;
+      // In Final Front, give walls a subtle blue glow so they read as solid obstacles against the dark backdrop.
+      ctx.shadowBlur = (block.type === 'WALL' && isFinalFrontStage) ? 4 * shadowScale
+        : block.type === 'WALL' ? 0
+        : (isFinalFrontStage ? 9 : 15) * shadowScale;
+      ctx.shadowColor = (block.type === 'WALL' && isFinalFrontStage) ? '#2255cc' : color;
       ctx.strokeStyle = color;
       ctx.lineWidth = block.type === 'WALL' ? (isFinalFrontStage ? 2 : 1) : 2;
 
@@ -5448,9 +5453,19 @@ export default function App() {
       }
 
       if (block.type === 'WALL') {
-        ctx.fillStyle = isFinalFrontStage ? 'rgba(18, 24, 52, 0.92)' : 'rgba(26, 26, 46, 0.8)';
+        ctx.fillStyle = isFinalFrontStage ? 'rgba(12, 22, 60, 0.96)' : 'rgba(26, 26, 46, 0.8)';
         ctx.fillRect(0, 0, block.width, block.height);
+        if (isFinalFrontStage) ctx.strokeStyle = '#2255cc';
         ctx.strokeRect(0, 0, block.width, block.height);
+        // Bright top edge in Final Front to read as a solid fortification.
+        if (isFinalFrontStage) {
+          ctx.strokeStyle = '#4488ff';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(block.width, 0);
+          ctx.stroke();
+        }
       } else if (block.type === 'TURRET_BLOCK') {
         // Wall base
         ctx.fillStyle = 'rgba(26, 20, 10, 0.88)';

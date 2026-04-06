@@ -21,9 +21,9 @@ View your app in AI Studio: https://ai.studio/apps/ec044b0c-3c79-4297-8542-29af2
 
 Two on-screen debug overlays are hidden by default. Enable them via URL parameter:
 
-| Parameter | Effect |
-|---|---|
+| Parameter       | Effect                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `?inputDebug=1` | Show **Perf_Baseline** (FPS / frame-time stats) and **Input_Debug** (mouse / touch / slingshot state) overlays during gameplay |
-| `?inputDebug=0` | Disable overlays and clear the persisted setting |
+| `?inputDebug=0` | Disable overlays and clear the persisted setting                                                                               |
 
 The setting is persisted in `localStorage` — once enabled with `?inputDebug=1`, overlays remain visible across reloads until explicitly disabled with `?inputDebug=0`.

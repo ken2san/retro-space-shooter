@@ -1,4 +1,4 @@
-import { CANVAS_WIDTH } from '../constants';
+import { CANVAS_WIDTH, isMobile } from '../constants';
 import { BossType, Enemy } from '../types';
 
 type BossHealth = { current: number; max: number };
@@ -62,6 +62,8 @@ export const buildWaveEnemies = (
   const enemies: Enemy[] = [];
   const stage = Math.min(5, Math.ceil(waveNum / 2));
   const isBossWave = waveNum === 6 || waveNum === 8 || waveNum === 10;
+  // Mobile devices have lower sustained fire rate — reduce boss HP to keep kill time reasonable.
+  const bossHpScale = isMobile ? 0.75 : 1.0;
 
   if (isBossWave) {
     if (waveNum === 6) {
@@ -72,14 +74,14 @@ export const buildWaveEnemies = (
         height: 90,
         isBoss: true,
         bossType: BossType.TRACTOR,
-        health: 1500,
-        maxHealth: 1500,
+        health: Math.round(1500 * bossHpScale),
+        maxHealth: Math.round(1500 * bossHpScale),
         phase: 1,
         moveDir: 1,
         lastShotTime: 0,
       };
       enemies.push(boss);
-      return { enemies, bossHealth: { current: 1500, max: 1500 }, playBossWarning: true };
+      return { enemies, bossHealth: { current: boss.health!, max: boss.maxHealth! }, playBossWarning: true };
     }
 
     if (waveNum === 10) {
@@ -91,14 +93,14 @@ export const buildWaveEnemies = (
         isBoss: true,
         bossType: BossType.LASER,
         isFinalBoss: true,
-        health: 5000,
-        maxHealth: 5000,
+        health: Math.round(5000 * bossHpScale),
+        maxHealth: Math.round(5000 * bossHpScale),
         phase: 1,
         moveDir: 1,
         lastShotTime: 0,
       };
       enemies.push(boss);
-      return { enemies, bossHealth: { current: 5000, max: 5000 }, playBossWarning: true };
+      return { enemies, bossHealth: { current: boss.health!, max: boss.maxHealth! }, playBossWarning: true };
     }
 
     const boss: Enemy = {
@@ -107,14 +109,14 @@ export const buildWaveEnemies = (
       height: 120,
       isBoss: true,
       bossType: BossType.SWARM,
-      health: 2200,
-      maxHealth: 2200,
+      health: Math.round(2200 * bossHpScale),
+      maxHealth: Math.round(2200 * bossHpScale),
       phase: 1,
       moveDir: 1,
       lastShotTime: 0,
     };
     enemies.push(boss);
-    return { enemies, bossHealth: { current: 2200, max: 2200 }, playBossWarning: true };
+    return { enemies, bossHealth: { current: boss.health!, max: boss.maxHealth! }, playBossWarning: true };
   }
 
   if (stage === 1) {
