@@ -10,11 +10,20 @@ View your app in AI Studio: https://ai.studio/apps/ec044b0c-3c79-4297-8542-29af2
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Run the app:
    `npm run dev`
+
+## Debug Overlays
+
+Two on-screen debug overlays are hidden by default. Enable them via URL parameter:
+
+| Parameter | Effect |
+|---|---|
+| `?inputDebug=1` | Show **Perf_Baseline** (FPS / frame-time stats) and **Input_Debug** (mouse / touch / slingshot state) overlays during gameplay |
+| `?inputDebug=0` | Disable overlays and clear the persisted setting |
+
+The setting is persisted in `localStorage` — once enabled with `?inputDebug=1`, overlays remain visible across reloads until explicitly disabled with `?inputDebug=0`.
