@@ -21,6 +21,7 @@ import {
 import NeonShip from './components/NeonShip';
 import GameHud from './components/GameHud';
 import StageTitleOverlay from './components/StageTitleOverlay';
+import TutorialOverlay from './components/TutorialOverlay';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
 import { bindInputListeners } from './hooks/useInput';
 import { LEVEL_UP_OPTIONS, RELIC_LABELS, RELIC_OPTIONS, UpgradeOption, pickRandomOptions } from './game/upgrades';
@@ -133,6 +134,8 @@ export default function App() {
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
   const [assets, setAssets] = useState<Record<string, HTMLImageElement>>({});
   const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const TUTORIAL_SEEN_KEY = 'neon:tutorial-seen';
+  const [showTutorial, setShowTutorial] = useState(false);
   const [hasWingman, setHasWingman] = useState(false);
   const wingmanRef = useRef(false);
   const wingmanPos = useRef({ x: 0, y: 0 });
@@ -459,9 +462,12 @@ export default function App() {
         await Promise.all(loadPromises);
         setAssets(loadedImages);
         setGameState('START');
+        if (!localStorage.getItem('neon:tutorial-seen')) {
+          setShowTutorial(true);
+          localStorage.setItem('neon:tutorial-seen', '1');
+        }
       } catch (error) {
         console.error('Failed to generate assets:', error);
-        // Fallback to start if generation fails (though it shouldn't)
         setGameState('START');
       }
     };
@@ -7131,6 +7137,12 @@ export default function App() {
                     {/* Internal Scanline Effect */}
                     <div className="absolute inset-0 opacity-0 group-hover:opacity-10 pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,255,204,0.5)_50%)] bg-size-[100%_4px]" />
                   </button>
+                  <button
+                    onClick={() => { localStorage.setItem('neon:tutorial-seen', '1'); setShowTutorial(true); }}
+                    className="text-[9px] uppercase tracking-[0.5em] font-black text-gray-600 hover:text-[#00ffcc] transition-colors duration-300"
+                  >
+                    ? How to Play
+                  </button>
 
                   {/* High-End Stats Display */}
                   <div className="flex items-center justify-center gap-16 w-full max-w-xs border-t border-white/5 pt-8">
@@ -7221,6 +7233,15 @@ export default function App() {
                 <RotateCcw size={24} /> Re-Engage
               </button>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showTutorial && (
+            <TutorialOverlay
+              isTouchDevice={isTouchDevice}
+              onClose={() => setShowTutorial(false)}
+            />
           )}
         </AnimatePresence>
       </div>
