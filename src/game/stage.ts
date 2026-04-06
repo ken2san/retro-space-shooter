@@ -15,11 +15,12 @@ export const getStageLabelFromWave = (wave: number): string => {
 };
 
 export const isSurvivalStage = (stage: number): boolean => {
-  return stage === 2 || stage === 3;
+  return stage === 2 || stage === 3 || stage === 4;
 };
 
 export const getSurvivalDurationFromStage = (stage: number): number => {
   if (stage === 2 || stage === 3) return 45;
+  if (stage === 4) return 40; // canyon chase — obstacles carry the difficulty
   if (isSurvivalStage(stage)) return 30;
   return 30;
 };

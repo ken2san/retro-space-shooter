@@ -146,6 +146,9 @@ export interface Obstacle {
   trackRight?: number;  // UNUSED — kept for backward compat
   baseVy?: number;      // extra downward speed for mobile BEAM_TURRET (on top of scroll)
   haltUntil?: number;   // timestamp: mobile turret freezes while aiming before firing
+  railPhase?: 0 | 1 | 2; // 0=descend, 1=slide horizontal, 2=descend again
+  railTurnY?: number;   // canvas Y at which phase 0→1 triggers
+  railTargetX?: number; // target block.x during horizontal slide (phase 1)
 }
 
 export interface DamageNumber {
