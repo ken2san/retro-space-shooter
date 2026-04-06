@@ -5736,6 +5736,89 @@ export default function App() {
     });
 
     // Draw Maze Blocks
+
+    // --- Mobile BEAM_TURRET rails: drawn in screen-absolute coords BEFORE block translate.
+    // Rails are fixed canyon infrastructure — they must NOT move with the turret body.
+    // Drawing them here (outside ctx.translate) makes them appear stationary while the
+    // turret slides along them.
+    blocks.current.forEach(block => {
+      if (block.type !== 'BEAM_TURRET' || block.hp <= 0) return;
+      if (block.baseVy === undefined) return; // fixed turrets have no rail
+      const bx = block.x + block.width / 2; // absolute canvas X centre of this turret
+      const railPhase = block.railPhase ?? 2;
+
+      ctx.save();
+      ctx.shadowBlur = 0;
+
+      // Vertical rail: full-height, always visible
+      const r1 = bx - 5;
+      const r2 = bx + 5;
+      ctx.fillStyle = 'rgba(0, 35, 50, 0.8)';
+      ctx.fillRect(r1 - 2, 0, 14, CANVAS_HEIGHT);
+      ctx.strokeStyle = 'rgba(0, 190, 170, 0.65)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(r1, 0); ctx.lineTo(r1, CANVAS_HEIGHT); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(r2, 0); ctx.lineTo(r2, CANVAS_HEIGHT); ctx.stroke();
+      // Vertical cross-ties every 20px — scroll-phase them so ties feel fixed in world
+      ctx.strokeStyle = 'rgba(0, 90, 110, 0.65)';
+      ctx.lineWidth = 1.5;
+      for (let ty2 = 0; ty2 < CANVAS_HEIGHT; ty2 += 20) {
+        ctx.beginPath(); ctx.moveTo(r1 - 3, ty2); ctx.lineTo(r2 + 3, ty2); ctx.stroke();
+      }
+
+      // Horizontal branch rail — shown when a lane-change is planned or in progress
+      const rtx = block.railTargetX;
+      const rty = block.railTurnY;
+      if (rtx !== undefined && rty !== undefined && railPhase <= 1) {
+        const destCx = rtx + block.width / 2;          // target lane centre X
+        const branchDir = destCx > bx ? 1 : -1;
+        const branchAlpha = railPhase === 1 ? 0.75 : 0.28;
+        const by1 = rty - 3;                            // top rail at railTurnY in screen space
+
+        ctx.fillStyle = `rgba(0, 35, 50, ${branchAlpha * 0.8})`;
+        ctx.fillRect(Math.min(bx, destCx), by1 - 4, Math.abs(destCx - bx), 14);
+
+        ctx.strokeStyle = `rgba(0, 190, 170, ${branchAlpha})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(bx, by1); ctx.lineTo(destCx, by1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx, by1 + 8); ctx.lineTo(destCx, by1 + 8); ctx.stroke();
+
+        ctx.strokeStyle = `rgba(0, 90, 110, ${branchAlpha})`;
+        ctx.lineWidth = 1.5;
+        const xStep = 20 * branchDir;
+        for (let hx = bx + xStep; branchDir > 0 ? hx < destCx : hx > destCx; hx += xStep) {
+          ctx.beginPath(); ctx.moveTo(hx, by1 - 4); ctx.lineTo(hx, by1 + 12); ctx.stroke();
+        }
+        // Junction diamond at turn point
+        ctx.fillStyle = `rgba(0, 255, 221, ${branchAlpha})`;
+        ctx.shadowBlur = railPhase === 1 ? 8 * shadowScale : 0;
+        ctx.shadowColor = '#00ffdd';
+        ctx.beginPath();
+        ctx.moveTo(bx, by1 - 5); ctx.lineTo(bx + 5, by1 + 4);
+        ctx.lineTo(bx, by1 + 13); ctx.lineTo(bx - 5, by1 + 4);
+        ctx.closePath(); ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Destination vertical rail stub — shows where the turret will end up
+        const dr1 = destCx - 5;
+        const dr2 = destCx + 5;
+        ctx.fillStyle = `rgba(0, 35, 50, ${branchAlpha * 0.6})`;
+        ctx.fillRect(dr1 - 2, rty, 14, CANVAS_HEIGHT - rty);
+        ctx.strokeStyle = `rgba(0, 190, 170, ${branchAlpha * 0.6})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(dr1, rty); ctx.lineTo(dr1, CANVAS_HEIGHT); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(dr2, rty); ctx.lineTo(dr2, CANVAS_HEIGHT); ctx.stroke();
+        ctx.strokeStyle = `rgba(0, 90, 110, ${branchAlpha * 0.6})`;
+        ctx.lineWidth = 1.5;
+        for (let ty2 = rty; ty2 < CANVAS_HEIGHT; ty2 += 20) {
+          ctx.beginPath(); ctx.moveTo(dr1 - 3, ty2); ctx.lineTo(dr2 + 3, ty2); ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    });
+
+    // Draw Maze Blocks (block bodies, no rail drawing inside)
     blocks.current.forEach(block => {
       if (block.hp <= 0) return;
       ctx.save();
@@ -5849,73 +5932,20 @@ export default function App() {
         const chargeProgress = Math.min(1, timeSinceShot / 3500);
         const isMobile = block.baseVy !== undefined;
         const isAiming = isMobile && drawNow < (block.haltUntil ?? 0);
-        const railPhase = block.railPhase ?? 2;
-        const railTargetX = block.railTargetX; // absolute canvas X of destination lane
 
-        // --- RAIL NETWORK (mobile only) ---
+        // Rail slot slider — the physical bracket that grips the (world-space) rail
         if (isMobile) {
-          const railX1 = tcx - 5;
-          const railX2 = tcx + 5;
-          const railTop = -block.height * 4;
-          ctx.shadowBlur = 0;
-
-          // Vertical section above turret (origin track — where it came from)
-          ctx.fillStyle = 'rgba(0, 40, 55, 0.85)';
-          ctx.fillRect(railX1 - 2, railTop, 14, -railTop);
-          ctx.strokeStyle = 'rgba(0, 200, 180, 0.7)';
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(railX1, railTop); ctx.lineTo(railX1, 0); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(railX2, railTop); ctx.lineTo(railX2, 0); ctx.stroke();
-          // Vertical cross-ties
-          ctx.strokeStyle = 'rgba(0, 100, 120, 0.7)';
+          const sx = block.width / 2;
+          ctx.shadowBlur = isAiming ? 10 * shadowScale : 0;
+          ctx.shadowColor = '#00ffdd';
+          ctx.fillStyle = isAiming ? 'rgba(0,255,221,0.55)' : 'rgba(0,150,150,0.45)';
+          // Top bracket
+          ctx.fillRect(sx - 7, -5, 14, 7);
+          // Side grip lines
+          ctx.strokeStyle = isAiming ? 'rgba(0,255,221,0.7)' : 'rgba(0,180,160,0.5)';
           ctx.lineWidth = 1.5;
-          const firstTie = Math.ceil(railTop / 20) * 20;
-          for (let ty2 = firstTie; ty2 <= 0; ty2 += 20) {
-            ctx.beginPath(); ctx.moveTo(railX1 - 3, ty2); ctx.lineTo(railX2 + 3, ty2); ctx.stroke();
-          }
-
-          // Horizontal branch — shown during phase 0 (ahead indicator) and phase 1 (active slide)
-          if (railTargetX !== undefined && railPhase <= 1) {
-            const localTargetX = railTargetX - block.x; // target in local block space
-            const branchDir = localTargetX > tcx ? 1 : -1;
-            const branchEnd = localTargetX + (branchDir > 0 ? block.width / 2 : -block.width / 2);
-            const branchAlpha = railPhase === 1 ? 0.8 : 0.35; // dimmer as preview during phase 0
-
-            // Horizontal groove
-            ctx.fillStyle = `rgba(0, 40, 55, ${branchAlpha * 0.8})`;
-            const branchY1 = -3;
-            ctx.fillRect(Math.min(tcx, branchEnd), branchY1 - 4, Math.abs(branchEnd - tcx), 14);
-            // Two horizontal rails
-            ctx.strokeStyle = `rgba(0, 200, 180, ${branchAlpha})`;
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(tcx, branchY1); ctx.lineTo(branchEnd, branchY1); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(tcx, branchY1 + 8); ctx.lineTo(branchEnd, branchY1 + 8); ctx.stroke();
-            // Horizontal cross-ties every 20px
-            ctx.strokeStyle = `rgba(0, 100, 120, ${branchAlpha})`;
-            ctx.lineWidth = 1.5;
-            const xStep = 20 * branchDir;
-            const xStart = tcx + xStep;
-            for (let hx = xStart; branchDir > 0 ? hx < branchEnd : hx > branchEnd; hx += xStep) {
-              ctx.beginPath(); ctx.moveTo(hx, branchY1 - 4); ctx.lineTo(hx, branchY1 + 12); ctx.stroke();
-            }
-            // Corner junction diamond
-            ctx.fillStyle = `rgba(0, 255, 221, ${branchAlpha})`;
-            ctx.shadowBlur = railPhase === 1 ? 8 * shadowScale : 0;
-            ctx.shadowColor = '#00ffdd';
-            ctx.beginPath();
-            ctx.moveTo(tcx, branchY1 - 5);
-            ctx.lineTo(tcx + 5, branchY1 + 4);
-            ctx.lineTo(tcx, branchY1 + 13);
-            ctx.lineTo(tcx - 5, branchY1 + 4);
-            ctx.closePath();
-            ctx.fill();
-            ctx.shadowBlur = 0;
-          }
-
-          // Wheel / slider block at turret top
-          ctx.fillStyle = isAiming ? 'rgba(0,255,221,0.6)' : 'rgba(0,160,160,0.5)';
-          if (isAiming) { ctx.shadowBlur = 10 * shadowScale; ctx.shadowColor = '#00ffdd'; }
-          ctx.fillRect(railX1 - 2, 0, 16, 6);
+          ctx.beginPath(); ctx.moveTo(sx - 7, -5); ctx.lineTo(sx - 7, 2); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(sx + 7, -5); ctx.lineTo(sx + 7, 2); ctx.stroke();
           ctx.shadowBlur = 0;
         }
 
