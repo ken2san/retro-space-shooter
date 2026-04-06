@@ -241,29 +241,24 @@ Ship a stable, deployable build to Firebase Hosting.
 
 ## Current Status
 
-Active phase: **Phase 5 (Release)**
+Active phase: **Phase 5 (Release) — mobile performance polish**
 
-### Experimental Branch: `slingshot/energy-wall`
+Current branch: `perf/speed-polish` (cut from main, 2026-04-06)
 
-Prototype for revised Overdrive flow via bullet absorption.
+### Completed Since Last Update (2026-04-06)
 
-**Design:**
+- `slingshot/energy-wall` merged into `main` and remote branch deleted
+- Mobile performance pass (committed `13505c9`, merged `2f1e976`):
+  - 60fps cap on ProMotion devices (14ms elapsed guard)
+  - Idle state 30fps throttle (non-PLAYING states skip odd frames)
+  - Adaptive sim tier escalation thresholds tightened for mobile
+  - Relic cache: `hasEMP/hasChrono/hasFrenzy/hasShieldRegen` computed once per frame
+  - Enemy bullet + particle caps tightened per sim tier on mobile
+  - O(n²) separation pass: mobile runs every other frame (frameCounterRef % 2)
+  - FOLLOWER pods: activation disabled + removed from upgrade pool entirely
 
-- Slingshot drag → enemy bullets caught in shield arc are absorbed → OD gauge charges
-- OD gauge reaches MAX → OD-Ready state (gold orbit ring on ship)
-- While OD-Ready, absorb one more bullet → Overdrive activates
-- OD activation resets gauge to 0
-- Shield arc color shifts cyan → gold as charge increases (visual gauge replacement candidate)
+### Active Work: `perf/speed-polish`
 
-**Status:** Implemented, not merged. Under evaluation.
-
-**Adoption gates:**
-
-- Fun/readability improves in playtest
-- No fairness regression (OD now skill-gated via absorption, not auto-triggered on hit)
-- Build passes (✅ confirmed 2026-04-05)
-
-### Immediate Next Validation
-
-- Re-run fixed 60s perf captures on boss-heavy windows and compare p95 frame time against prior baseline
-- Verify readability/telegraph quality for reduced boss FX at load tiers 1 and 2
+- shadowBlur tier-scaled on mobile (in progress)
+- Windmill blade collision stride under load (in progress)
+- Heavy Fire stage load profiling

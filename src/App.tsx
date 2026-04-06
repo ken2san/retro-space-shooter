@@ -254,6 +254,7 @@ export default function App() {
   // Power-up & Overdrive State
   const powerUps = useRef<PowerUp[]>([]);
   const lastRepairDropAt = useRef(0);
+  const lastBossHealthUpdateAt = useRef(0);
   const repairDropsDuringBossRef = useRef(0);
   const activeEffects = useRef<Record<string, number>>({});
   const overdriveGauge = useRef(0);
@@ -310,7 +311,7 @@ export default function App() {
   useEffect(() => {
     window.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    stars.current = Array.from({ length: 100 }, () => ({
+    stars.current = Array.from({ length: isMobile ? 60 : 100 }, () => ({
       x: Math.random() * CANVAS_WIDTH,
       y: Math.random() * CANVAS_HEIGHT,
       size: Math.random() * 2 + 1,
@@ -3086,24 +3087,28 @@ export default function App() {
         }
       });
       // Windmill blade destroys any bullet (player or enemy) that enters the swept arc.
+      // Under load, stride the check — missing one frame has no fairness impact at 60fps+.
       if (block.type === 'WINDMILL' && block.hp > 0) {
-        const wbcx = block.x + block.width / 2;
-        const wbcy = block.y + block.height / 2;
-        const wbArm = block.height * 2.9;
-        const wbRot = frameNow * 0.00025 + (block.id % 100) * 0.9;
-        const hitsWindmillBlade = (bx: number, by: number) => {
-          const ddx = bx - wbcx;
-          const ddy = by - wbcy;
-          const dd = ddx * ddx + ddy * ddy;
-          if (dd > wbArm * wbArm || dd < 16) return false;
-          const bAngle = Math.atan2(ddy, ddx);
-          for (let k = 0; k < 2; k++) {
-            if (Math.abs(normalizeAngle(bAngle - (wbRot + k * Math.PI))) < 0.15) return true;
-          }
-          return false;
-        };
-        bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
-        enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+        const windmillStride = isCriticalSim ? 3 : isReducedSim ? 2 : 1;
+        if (frameCounterRef.current % windmillStride === 0) {
+          const wbcx = block.x + block.width / 2;
+          const wbcy = block.y + block.height / 2;
+          const wbArm = block.height * 2.9;
+          const wbRot = frameNow * 0.00025 + (block.id % 100) * 0.9;
+          const hitsWindmillBlade = (bx: number, by: number) => {
+            const ddx = bx - wbcx;
+            const ddy = by - wbcy;
+            const dd = ddx * ddx + ddy * ddy;
+            if (dd > wbArm * wbArm || dd < 16) return false;
+            const bAngle = Math.atan2(ddy, ddx);
+            for (let k = 0; k < 2; k++) {
+              if (Math.abs(normalizeAngle(bAngle - (wbRot + k * Math.PI))) < 0.15) return true;
+            }
+            return false;
+          };
+          bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+          enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+        }
       }
     });
     // TURRET_BLOCK shooting: aim and fire at player
@@ -3482,7 +3487,7 @@ export default function App() {
 
     // Shooting
     const isRapid = (activeEffects.current['RAPIDFIRE'] > Date.now()) || isOverdriveActiveRef.current;
-    const shootInterval = isOverdriveActiveRef.current ? 80 : isRapid ? 120 : 250;
+    const shootInterval = isOverdriveActiveRef.current ? (isMobile ? 100 : 80) : isRapid ? 120 : 250;
 
     if (gameState === 'PLAYING') {
       const now = Date.now();
@@ -3493,14 +3498,15 @@ export default function App() {
         const bulletSize = 4 + (firepowerRef.current - 1) * 2;
 
         if (isOver) {
-          // Super Overdrive Shot - Nerfed damage but kept intensity
-          for (let i = -2; i <= 2; i++) {
+          // Super Overdrive Shot — mobile fires 3-spread to save bullet/collision cost
+          const spreadRange = isMobile ? 1 : 2; // mobile: -1..1 (3 bullets), desktop: -2..2 (5)
+          for (let i = -spreadRange; i <= spreadRange; i++) {
             bullets.current.push({
               x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2 + i * 15,
               y: playerPos.current.y,
               vx: i * 0.5,
               vy: -BULLET_SPEED * 1.5,
-              damage: bulletDamage * 1.5, // 2x -> 1.5x
+              damage: bulletDamage * 1.5,
               size: bulletSize * 1.2
             });
           }
@@ -4312,7 +4318,13 @@ export default function App() {
 
           if (enemy.isBoss) {
             enemy.health! -= damage;
-            setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
+            // Throttle React state update: during Overdrive ≈75 hits/s → 60ms cap prevents
+            // that many re-renders from stalling the game loop on mobile.
+            const bossNow = Date.now();
+            if (bossNow - lastBossHealthUpdateAt.current >= (isMobile ? 60 : 16)) {
+              setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
+              lastBossHealthUpdateAt.current = bossNow;
+            }
             playerBullets.splice(i, 1);
             audio.playEnemyHit(enemy.x + enemy.width / 2);
             flash.current = 0.2;
@@ -5059,6 +5071,11 @@ export default function App() {
     const drawLoadTier = renderLoadTierRef.current;
     const isReducedBossFx = drawLoadTier >= 1;
     const isMinimalBossFx = drawLoadTier >= 2;
+    // shadowBlur scale: tier 0 = full, tier 1 = 60%, tier 2 = 0 (off)
+    // On mobile tier 0 is already reduced; desktop is unaffected until load rises.
+    const shadowScale = isMobile
+      ? (drawLoadTier >= 2 ? 0 : drawLoadTier >= 1 ? 0.5 : 0.7)
+      : 1;
     const isChase = currentStage === 4;
     const isFinalFrontStage = currentStage === 5;
     const isChaseLoadReduced = isChase && drawLoadTier >= 1;  // Skip fancy Chase rendering under load
@@ -5108,6 +5125,10 @@ export default function App() {
           ctx.moveTo(s.x, s.y);
           ctx.lineTo(s.x, s.y - s.size * stretch);
           ctx.stroke();
+        } else if (isMobile) {
+          // fillRect is significantly cheaper than arc on mobile GPUs
+          const d = Math.max(1, s.size);
+          ctx.fillRect(s.x - d, s.y - d, d * 2, d * 2);
         } else {
           ctx.beginPath();
           ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
@@ -5131,20 +5152,22 @@ export default function App() {
     const gridSpeed = isWarping.current ? 100 : 20;
     const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
 
-    // Only draw vertical lines on mobile to save performance
-    if (!isMobile) {
-      for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
+    // Skip grid entirely on mobile under load — low visual impact, non-trivial CPU cost
+    if (!isMobile || drawLoadTier === 0) {
+      if (!isMobile) {
+        for (let x = 0; x <= CANVAS_WIDTH; x += gridSpacing) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, CANVAS_HEIGHT);
+          ctx.stroke();
+        }
+      }
+      for (let y = gridOffset; y <= CANVAS_HEIGHT; y += gridSpacing) {
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, CANVAS_HEIGHT);
+        ctx.moveTo(0, y);
+        ctx.lineTo(CANVAS_WIDTH, y);
         ctx.stroke();
       }
-    }
-    for (let y = gridOffset; y <= CANVAS_HEIGHT; y += gridSpacing) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(CANVAS_WIDTH, y);
-      ctx.stroke();
     }
 
     if (isFinalFrontStage) {
@@ -5231,7 +5254,8 @@ export default function App() {
       ctx.save();
       ctx.translate(a.x, a.y);
       ctx.rotate(a.rotation);
-      if (!isMobile) ctx.shadowBlur = 10;
+      if (isMobile) ctx.shadowBlur = 0;
+      else ctx.shadowBlur = 10;
 
       const isLarge = a.size > 35;
       if (!isMobile) ctx.shadowColor = isLarge ? '#00ffcc' : '#888';
@@ -5247,6 +5271,12 @@ export default function App() {
         else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
       }
       ctx.closePath();
+      // On mobile fill the asteroid interior with a near-black color so the
+      // solid look is intentional rather than an artifact of frame persistence.
+      if (isMobile) {
+        ctx.fillStyle = isLarge ? 'rgba(0, 18, 12, 0.92)' : 'rgba(8, 8, 8, 0.92)';
+        ctx.fill();
+      }
       ctx.stroke();
 
       // Inner wireframe for large asteroids
@@ -5270,7 +5300,7 @@ export default function App() {
     scraps.current.forEach(s => {
       ctx.save();
       ctx.translate(s.x, s.y);
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 10 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.fillStyle = '#00ffcc';
       ctx.beginPath();
@@ -5292,7 +5322,7 @@ export default function App() {
             ? '#66ff99'
             : '#ff33cc';
       const label = p.type === 'REPAIR' ? 'H' : p.type[0];
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
@@ -5313,7 +5343,7 @@ export default function App() {
       ctx.translate(obs.x, obs.y);
 
       const color = obs.color;
-      ctx.shadowBlur = isFinalFrontStage ? 10 : 15;
+      ctx.shadowBlur = (isFinalFrontStage ? 10 : 15) * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = isFinalFrontStage ? 4 : 3;
@@ -5392,7 +5422,7 @@ export default function App() {
       ctx.translate(block.x, block.y);
 
       const color = block.color;
-      ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15);
+      ctx.shadowBlur = block.type === 'WALL' ? 0 : (isFinalFrontStage ? 9 : 15) * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = block.type === 'WALL' ? (isFinalFrontStage ? 2 : 1) : 2;
@@ -5422,7 +5452,7 @@ export default function App() {
         const tcx = block.width / 2;
         const tcy = block.height / 2;
         const tr = Math.min(block.width, block.height) * 0.26;
-        ctx.shadowBlur = 14;
+        ctx.shadowBlur = 14 * shadowScale;
         ctx.shadowColor = '#ff9900';
         ctx.strokeStyle = '#ff9900';
         ctx.lineWidth = 2;
@@ -5462,7 +5492,7 @@ export default function App() {
         // Arms extend well beyond block edges to act as a corridor hazard.
         const armLen = block.height * 2.9;
         const rot = drawNow * 0.00025 + (block.id % 100) * 0.9;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 10 * shadowScale;
         ctx.shadowColor = '#00ffaa';
         ctx.strokeStyle = '#00ffaa';
         ctx.lineWidth = 3;
@@ -5475,7 +5505,7 @@ export default function App() {
           ctx.stroke();
         }
         ctx.fillStyle = '#00ffaa';
-        ctx.shadowBlur = 6;
+        ctx.shadowBlur = 6 * shadowScale;
         ctx.beginPath();
         ctx.arc(wcx, wcy, 5, 0, Math.PI * 2);
         ctx.fill();
@@ -5566,7 +5596,7 @@ export default function App() {
       ctx.save();
       ctx.globalAlpha = t.alpha * VFX_SLINGSHOT_TRAIL_ALPHA;
       ctx.fillStyle = '#ffffff';
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.beginPath();
       ctx.arc(t.x, t.y, 10 * t.alpha, 0, Math.PI * 2);
@@ -5858,7 +5888,7 @@ export default function App() {
       if (activeEffects.current['SHIELD'] > Date.now()) {
         ctx.strokeStyle = '#33ccff';
         ctx.lineWidth = 2;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 10 * shadowScale;
         ctx.beginPath();
         ctx.arc(0, 0, 35, 0, Math.PI * 2);
         ctx.stroke();
@@ -5876,7 +5906,7 @@ export default function App() {
       const color = '#ff33cc';
       ctx.strokeStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.lineWidth = 2;
 
       // High-End Neon Vector Ship (Wingman)
@@ -5896,7 +5926,7 @@ export default function App() {
     }
 
     // Bullets
-    if (!isMobile) ctx.shadowBlur = 15;
+    ctx.shadowBlur = 15 * shadowScale;
     bullets.current.forEach((b) => {
       const size = b.size || 4;
       ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
@@ -5907,10 +5937,8 @@ export default function App() {
 
     // Enemy Bullets
     ctx.fillStyle = '#ff9900'; // Changed to Orange for better visibility against player's pink Overdrive
-    if (!isMobile) {
-      ctx.shadowColor = '#ff9900';
-      ctx.shadowBlur = 10;
-    }
+    ctx.shadowColor = '#ff9900';
+    ctx.shadowBlur = 10 * shadowScale;
     enemyBullets.current.forEach((b) => {
       ctx.beginPath();
       ctx.arc(b.x + 2, b.y + 6, 4, 0, Math.PI * 2);
@@ -5929,7 +5957,7 @@ export default function App() {
         // Boss Rendering
         const color = enemy.bossType === BossType.LASER ? '#00ffcc' : '#ff3366';
         const pulse = Math.sin(drawNow / 150) * 10;
-        ctx.shadowBlur = isMinimalBossFx ? 7 : isReducedBossFx ? 11 : 15;
+        ctx.shadowBlur = (isMinimalBossFx ? 7 : isReducedBossFx ? 11 : 15) * shadowScale;
         ctx.shadowColor = color;
         ctx.strokeStyle = color;
         ctx.lineWidth = 4;
@@ -5993,7 +6021,7 @@ export default function App() {
             ctx.save();
             ctx.lineWidth = (isMinimalBossFx ? 5 : isReducedBossFx ? 6.5 : 8) + Math.sin(drawNow / 50) * (isMinimalBossFx ? 2 : isReducedBossFx ? 3 : 4);
             ctx.strokeStyle = isMinimalBossFx ? 'rgba(0, 255, 255, 0.82)' : isReducedBossFx ? 'rgba(0, 255, 255, 0.9)' : '#00ffff';
-            ctx.shadowBlur = isMinimalBossFx ? 8 : isReducedBossFx ? 14 : 20;
+            ctx.shadowBlur = (isMinimalBossFx ? 8 : isReducedBossFx ? 14 : 20) * shadowScale;
             ctx.shadowColor = '#00ffff';
             for (let i = 0; i < laserCount; i++) {
               const laserAngle = angle + (i * Math.PI * 2 / laserCount);
@@ -6063,7 +6091,7 @@ export default function App() {
         const color = '#ffcc00';
         ctx.strokeStyle = color;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 15 * shadowScale;
         ctx.lineWidth = 3;
 
         ctx.beginPath();
@@ -6097,7 +6125,7 @@ export default function App() {
               ctx.save();
               ctx.strokeStyle = color;
               ctx.lineWidth = 3;
-              ctx.shadowBlur = 6;
+              ctx.shadowBlur = 6 * shadowScale;
               ctx.shadowColor = glowColor;
               ctx.beginPath();
               t.segments.forEach((seg, i) => {
@@ -6121,7 +6149,7 @@ export default function App() {
               }
 
               // Glow
-              ctx.shadowBlur = 15;
+              ctx.shadowBlur = 15 * shadowScale;
               ctx.shadowColor = glowColor;
 
               // Organic segment
@@ -6149,7 +6177,7 @@ export default function App() {
             ctx.save();
             ctx.translate(tip.x, tip.y);
             ctx.fillStyle = '#ffffff';
-            ctx.shadowBlur = isMinimalBossFx ? 10 : 20;
+            ctx.shadowBlur = (isMinimalBossFx ? 10 : 20) * shadowScale;
             ctx.shadowColor = '#ffffff';
             ctx.beginPath();
             ctx.arc(0, 0, 5 + Math.sin(time * 10) * 3, 0, Math.PI * 2);
@@ -6162,7 +6190,7 @@ export default function App() {
           ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
           const coreHue = (time * 100) % 360;
           ctx.fillStyle = `hsla(${coreHue}, 90%, 50%, 1)`;
-          ctx.shadowBlur = isMinimalBossFx ? 14 : 30;
+          ctx.shadowBlur = (isMinimalBossFx ? 14 : 30) * shadowScale;
           ctx.shadowColor = `hsla(${coreHue}, 90%, 50%, 0.8)`;
           ctx.beginPath();
           ctx.arc(0, 0, 30 + Math.sin(time * 8) * 5, 0, Math.PI * 2);
@@ -6203,7 +6231,7 @@ export default function App() {
       const colors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
       const color = colors[enemy.type] || '#ffcc00';
 
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = color;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
