@@ -307,6 +307,7 @@ export default function App() {
   const [stageProgress, setStageProgress] = useState(0);
   const wavePeakAliveRef = useRef(1);
   const waveHasBossRef = useRef(false);
+  const victoryPendingRef = useRef(false);
   const lastProgressUiUpdateAt = useRef(0);
   const lastAutoSpaceAt = useRef(0);
   const lastTentacleShieldDeflectAt = useRef(0);
@@ -1053,6 +1054,7 @@ export default function App() {
     integrityRef.current = 100;
     setIntegrity(100);
     waveRef.current = 1;
+    victoryPendingRef.current = false;
     setHasWingman(false);
     wingmanRef.current = false;
     isHackedRef.current = false;
@@ -4521,6 +4523,7 @@ export default function App() {
               }
 
               if (enemy.isFinalBoss) {
+                victoryPendingRef.current = true;
                 setGameState('VICTORY');
               }
 
@@ -5193,7 +5196,7 @@ export default function App() {
       });
     }
 
-    if (isWaveCleared && gameState === 'PLAYING') {
+    if (isWaveCleared && gameState === 'PLAYING' && !victoryPendingRef.current) {
       isWarping.current = true;
       warpStartTime.current = Date.now();
       setIsWarpingState(true);
