@@ -870,39 +870,43 @@ export default function App() {
       tentacleChance = 0; // No tentacles — too much at once with boss fight
     } else if (currentStage === 4) {
       // Stage 4 "Chase": canyon corridor patterns.
-      // Fixed BEAM_TURRETs (edge slots 0/9) are bolted installations on the canyon wall.
-      // Mobile BEAM_TURRETs (middle slots) descend vertically on rails, pause to aim, then fire.
+      // Fixed BEAM_TURRETs (edge slots 0/9) are bolted to canyon walls.
+      // Mobile BEAM_TURRETs (middle slots) slide horizontally on rails laid across the row's walls.
       const layouts: (null | 'WALL' | 'BUILDING' | 'BEAM_TURRET')[][] = [
-        ['WALL', 'WALL', null, null, null, null, null, null, null, null],          // left flank
-        [null, null, null, null, null, null, null, null, 'WALL', 'WALL'],          // right flank
-        [null, null, null, 'WALL', 'WALL', 'WALL', 'WALL', null, null, null],     // centre divider
-        ['WALL', 'WALL', null, null, 'WALL', 'WALL', null, null, 'WALL', 'WALL'], // triple narrow lanes
-        [null, 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', null], // breakable barrier
-        ['WALL', null, null, null, null, null, null, null, null, 'WALL'],          // outer walls — wide lane
-        ['BEAM_TURRET', null, null, null, null, null, null, null, null, 'BEAM_TURRET'], // twin fixed cannons (edge)
-        ['BEAM_TURRET', 'WALL', null, null, null, null, null, null, 'WALL', 'BEAM_TURRET'], // fixed cannons behind walls
-        ['WALL', null, null, null, 'BEAM_TURRET', null, null, null, null, 'WALL'], // single mobile descender
-        ['WALL', null, 'BUILDING', null, 'BEAM_TURRET', null, 'BUILDING', null, null, 'WALL'], // mobile + destructible cover
-        ['WALL', null, null, 'BEAM_TURRET', null, null, 'BEAM_TURRET', null, null, 'WALL'], // twin mobile descenders
-        [null, null, null, null, null, null, null, null, null, null],              // breather
-        [null, null, null, null, null, null, null, null, null, null],              // breather
+        ['WALL', 'WALL', null, null, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null, null, 'WALL', 'WALL'],
+        [null, null, null, 'WALL', 'WALL', 'WALL', 'WALL', null, null, null],
+        ['WALL', 'WALL', null, null, 'WALL', 'WALL', null, null, 'WALL', 'WALL'],
+        [null, 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', 'BUILDING', null],
+        ['WALL', null, null, null, null, null, null, null, null, 'WALL'],
+        ['BEAM_TURRET', null, null, null, null, null, null, null, null, 'BEAM_TURRET'],
+        ['BEAM_TURRET', 'WALL', null, null, null, null, null, null, 'WALL', 'BEAM_TURRET'],
+        ['WALL', null, null, null, 'BEAM_TURRET', null, null, null, null, 'WALL'],
+        ['WALL', null, 'BUILDING', null, 'BEAM_TURRET', null, 'BUILDING', null, null, 'WALL'],
+        ['WALL', null, null, 'BEAM_TURRET', null, null, 'BEAM_TURRET', null, null, 'WALL'],
+        [null, null, null, null, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null, null, null, null],
       ];
       const layout = layouts[Math.floor(Math.random() * layouts.length)];
       for (let i = 0; i < 10; i++) {
         const slotType = layout[i];
         if (!slotType) continue;
-        // Mobile: middle-slot BEAM_TURRETs descend on vertical rails (baseVy > 0)
+        // Mobile: BEAM_TURRET in non-edge slots slides on rail between nearest walls
         const isMobile = slotType === 'BEAM_TURRET' && i > 0 && i < 9;
-        // Mobile turret: descend → slide sideways to a different lane → descend again
-        const railTurnY = isMobile ? (180 + Math.random() * 220) : undefined; // turn at canvas Y 180-400
-        const railTargetLane = isMobile
-          ? (() => {
-              let lane = Math.floor(Math.random() * 8) + 1;
-              if (lane === i) lane = lane < 5 ? lane + 2 : lane - 2;          // ensure lateral movement
-              return lane;
-            })()
-          : undefined;
-        const railTargetX = railTargetLane !== undefined ? railTargetLane * blockWidth : undefined;
+        let trackLeft: number | undefined;
+        let trackRight: number | undefined;
+        if (isMobile) {
+          let tL = 0;
+          for (let li = i - 1; li >= 0; li--) {
+            if (layout[li] === 'WALL') { tL = (li + 1) * blockWidth; break; }
+          }
+          let tR = CANVAS_WIDTH;
+          for (let ri = i + 1; ri < 10; ri++) {
+            if (layout[ri] === 'WALL') { tR = ri * blockWidth; break; }
+          }
+          trackLeft = tL;
+          trackRight = tR - blockWidth;
+        }
         blocks.current.push({
           id: Date.now() + i,
           x: i * blockWidth,
@@ -914,11 +918,10 @@ export default function App() {
           maxHp: slotType === 'WALL' ? 999 : slotType === 'BEAM_TURRET' ? 50 : 10,
           color: slotType === 'WALL' ? '#1a1a2e' : slotType === 'BEAM_TURRET' ? '#00ffdd' : '#33ccff',
           lastShotTime: 0,
-          baseVy: isMobile ? 0.55 : undefined, // extra descent speed on top of world scroll
+          vx: isMobile ? (Math.random() < 0.5 ? 0.5 : -0.5) : undefined,
+          trackLeft,
+          trackRight,
           haltUntil: 0,
-          railPhase: isMobile ? 0 : undefined,
-          railTurnY,
-          railTargetX,
         });
       }
       return;
@@ -3252,8 +3255,7 @@ export default function App() {
         if (block.type !== 'BEAM_TURRET' || block.hp <= 0) return;
         if (block.y < -block.height || block.y > CANVAS_HEIGHT) return;
         const timeSinceShot = now - (block.lastShotTime ?? 0);
-        const isMobile = block.baseVy !== undefined;
-        // Mobile: latch haltUntil once when entering the aim window
+        const isMobile = block.vx !== undefined;
         if (isMobile && timeSinceShot >= FIRE_INTERVAL - HALT_LEAD && !block.haltUntil) {
           block.haltUntil = now + HALT_LEAD;
         }
@@ -3395,44 +3397,21 @@ export default function App() {
       }
     }
 
-    // BEAM_TURRET mobile: phased rail movement (descend → slide → descend) + halt-to-aim
+    // BEAM_TURRET mobile: horizontal slide on rail between wall bounds, pause to aim before firing
     {
       const now = Date.now();
       blocks.current.forEach(turret => {
-        if (turret.type !== 'BEAM_TURRET' || turret.hp <= 0) return;
-        if (turret.baseVy === undefined) return; // fixed turrets: no extra movement
+        if (turret.type !== 'BEAM_TURRET' || turret.hp <= 0 || !turret.vx) return;
         const halting = now < (turret.haltUntil ?? 0);
         if (halting) return;
-        const speed = turret.baseVy * worldSpeedScale * dt;
-        const phase = turret.railPhase ?? 2;
-        let moveX = 0;
-        let moveY = 0;
-        if (phase === 0) {
-          // Phase 0: descend toward turn point
-          moveY = speed;
-          if (turret.y + turret.height / 2 > (turret.railTurnY ?? CANVAS_HEIGHT)) {
-            turret.railPhase = 1;
-          }
-        } else if (phase === 1) {
-          // Phase 1: slide horizontally to target lane (locomotive routing)
-          const tx = turret.railTargetX ?? turret.x;
-          const xdiff = tx - turret.x;
-          if (Math.abs(xdiff) > speed) {
-            moveX = Math.sign(xdiff) * speed;
-            moveY = speed * 0.15; // slight downward drift during slide
-          } else {
-            turret.x = tx; // snap to lane
-            turret.railPhase = 2;
-          }
+        turret.x += turret.vx * worldSpeedScale * dt;
+        if (turret.trackLeft !== undefined && turret.trackRight !== undefined) {
+          if (turret.x < turret.trackLeft)  { turret.x = turret.trackLeft;  turret.vx =  Math.abs(turret.vx); }
+          if (turret.x > turret.trackRight) { turret.x = turret.trackRight; turret.vx = -Math.abs(turret.vx); }
         } else {
-          // Phase 2: continue descent (hunting)
-          moveY = speed;
-          // Brief lunge after firing for recoil feel
-          const msSinceFire = now - (turret.lastShotTime ?? 0);
-          if (msSinceFire < 400) moveY += speed * 2;
+          if (turret.x < 0)                           { turret.x = 0;                           turret.vx =  Math.abs(turret.vx); }
+          if (turret.x + turret.width > CANVAS_WIDTH)  { turret.x = CANVAS_WIDTH - turret.width;  turret.vx = -Math.abs(turret.vx); }
         }
-        turret.x += moveX;
-        turret.y += moveY;
       });
     }
 
@@ -5737,88 +5716,39 @@ export default function App() {
 
     // Draw Maze Blocks
 
-    // --- Mobile BEAM_TURRET rails: drawn in screen-absolute coords BEFORE block translate.
-    // Rails are fixed canyon infrastructure — they must NOT move with the turret body.
-    // Drawing them here (outside ctx.translate) makes them appear stationary while the
-    // turret slides along them.
+    // --- Mobile BEAM_TURRET rails: horizontal track drawn at the block's world Y,
+    // spanning trackLeft to trackRight+blockWidth. Drawn BEFORE block translate so the
+    // rail uses world coords (block.y changes with world scroll, block.x stays fixed on walls).
     blocks.current.forEach(block => {
-      if (block.type !== 'BEAM_TURRET' || block.hp <= 0) return;
-      if (block.baseVy === undefined) return; // fixed turrets have no rail
-      const bx = block.x + block.width / 2; // absolute canvas X centre of this turret
-      const railPhase = block.railPhase ?? 2;
+      if (block.type !== 'BEAM_TURRET' || block.hp <= 0 || !block.vx) return;
+      const left  = block.trackLeft  ?? 0;
+      const right = (block.trackRight ?? CANVAS_WIDTH - block.width) + block.width;
+      const ry    = block.y + block.height * 0.18; // top-third of block = rail sits on wall surface
 
       ctx.save();
       ctx.shadowBlur = 0;
 
-      // Vertical rail: full-height, always visible
-      const r1 = bx - 5;
-      const r2 = bx + 5;
-      ctx.fillStyle = 'rgba(0, 35, 50, 0.8)';
-      ctx.fillRect(r1 - 2, 0, 14, CANVAS_HEIGHT);
-      ctx.strokeStyle = 'rgba(0, 190, 170, 0.65)';
+      // Rail bed background
+      ctx.fillStyle = 'rgba(0, 35, 50, 0.7)';
+      ctx.fillRect(left, ry - 3, right - left, 12);
+
+      // Two rail lines
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(r1, 0); ctx.lineTo(r1, CANVAS_HEIGHT); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(r2, 0); ctx.lineTo(r2, CANVAS_HEIGHT); ctx.stroke();
-      // Vertical cross-ties every 20px — scroll-phase them so ties feel fixed in world
-      ctx.strokeStyle = 'rgba(0, 90, 110, 0.65)';
+      ctx.strokeStyle = 'rgba(0, 190, 170, 0.7)';
+      ctx.beginPath(); ctx.moveTo(left, ry); ctx.lineTo(right, ry); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, ry + 6); ctx.lineTo(right, ry + 6); ctx.stroke();
+
+      // Cross-ties every 14px
       ctx.lineWidth = 1.5;
-      for (let ty2 = 0; ty2 < CANVAS_HEIGHT; ty2 += 20) {
-        ctx.beginPath(); ctx.moveTo(r1 - 3, ty2); ctx.lineTo(r2 + 3, ty2); ctx.stroke();
-      }
-
-      // Horizontal branch rail — shown when a lane-change is planned or in progress
-      const rtx = block.railTargetX;
-      const rty = block.railTurnY;
-      if (rtx !== undefined && rty !== undefined && railPhase <= 1) {
-        const destCx = rtx + block.width / 2;          // target lane centre X
-        const branchDir = destCx > bx ? 1 : -1;
-        const branchAlpha = railPhase === 1 ? 0.75 : 0.28;
-        const by1 = rty - 3;                            // top rail at railTurnY in screen space
-
-        ctx.fillStyle = `rgba(0, 35, 50, ${branchAlpha * 0.8})`;
-        ctx.fillRect(Math.min(bx, destCx), by1 - 4, Math.abs(destCx - bx), 14);
-
-        ctx.strokeStyle = `rgba(0, 190, 170, ${branchAlpha})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(bx, by1); ctx.lineTo(destCx, by1); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(bx, by1 + 8); ctx.lineTo(destCx, by1 + 8); ctx.stroke();
-
-        ctx.strokeStyle = `rgba(0, 90, 110, ${branchAlpha})`;
-        ctx.lineWidth = 1.5;
-        const xStep = 20 * branchDir;
-        for (let hx = bx + xStep; branchDir > 0 ? hx < destCx : hx > destCx; hx += xStep) {
-          ctx.beginPath(); ctx.moveTo(hx, by1 - 4); ctx.lineTo(hx, by1 + 12); ctx.stroke();
-        }
-        // Junction diamond at turn point
-        ctx.fillStyle = `rgba(0, 255, 221, ${branchAlpha})`;
-        ctx.shadowBlur = railPhase === 1 ? 8 * shadowScale : 0;
-        ctx.shadowColor = '#00ffdd';
-        ctx.beginPath();
-        ctx.moveTo(bx, by1 - 5); ctx.lineTo(bx + 5, by1 + 4);
-        ctx.lineTo(bx, by1 + 13); ctx.lineTo(bx - 5, by1 + 4);
-        ctx.closePath(); ctx.fill();
-        ctx.shadowBlur = 0;
-
-        // Destination vertical rail stub — shows where the turret will end up
-        const dr1 = destCx - 5;
-        const dr2 = destCx + 5;
-        ctx.fillStyle = `rgba(0, 35, 50, ${branchAlpha * 0.6})`;
-        ctx.fillRect(dr1 - 2, rty, 14, CANVAS_HEIGHT - rty);
-        ctx.strokeStyle = `rgba(0, 190, 170, ${branchAlpha * 0.6})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(dr1, rty); ctx.lineTo(dr1, CANVAS_HEIGHT); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(dr2, rty); ctx.lineTo(dr2, CANVAS_HEIGHT); ctx.stroke();
-        ctx.strokeStyle = `rgba(0, 90, 110, ${branchAlpha * 0.6})`;
-        ctx.lineWidth = 1.5;
-        for (let ty2 = rty; ty2 < CANVAS_HEIGHT; ty2 += 20) {
-          ctx.beginPath(); ctx.moveTo(dr1 - 3, ty2); ctx.lineTo(dr2 + 3, ty2); ctx.stroke();
-        }
+      ctx.strokeStyle = 'rgba(0, 90, 110, 0.7)';
+      for (let tx = left + 7; tx < right; tx += 14) {
+        ctx.beginPath(); ctx.moveTo(tx, ry - 3); ctx.lineTo(tx, ry + 9); ctx.stroke();
       }
 
       ctx.restore();
     });
 
-    // Draw Maze Blocks (block bodies, no rail drawing inside)
+    // Draw Maze Blocks (block bodies)
     blocks.current.forEach(block => {
       if (block.hp <= 0) return;
       ctx.save();
@@ -5930,7 +5860,7 @@ export default function App() {
         const tcy = block.height / 2;
         const timeSinceShot = drawNow - (block.lastShotTime ?? 0);
         const chargeProgress = Math.min(1, timeSinceShot / 3500);
-        const isMobile = block.baseVy !== undefined;
+        const isMobile = block.vx !== undefined;
         const isAiming = isMobile && drawNow < (block.haltUntil ?? 0);
 
         // Rail slot slider — the physical bracket that grips the (world-space) rail
