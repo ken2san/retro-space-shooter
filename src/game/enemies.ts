@@ -144,46 +144,24 @@ export const buildWaveEnemies = (
       enemies.push(turret);
     }
   } else if (stage === 4) {
-    if (waveNum === 4) {
-      // Tentacle Boss (mid-boss)
-      const boss = createEnemy(CANVAS_WIDTH / 2 - 50, 100, 3);
-      boss.width = 100;
-      boss.height = 100;
-      boss.health = 1500 + waveRefCurrent * 100;
-      boss.maxHealth = boss.health;
-      boss.isBoss = true;
-      boss.bossType = BossType.TENTACLE;
-      boss.state = 'BOSS';
-      boss.phase = 1;
-      boss.tentacles = [
-        { segments: [], baseAngle: 0, targetAngle: 0, length: 280 },
-        { segments: [], baseAngle: Math.PI / 3, targetAngle: 0, length: 280 },
-        { segments: [], baseAngle: (Math.PI * 2) / 3, targetAngle: 0, length: 280 },
-        { segments: [], baseAngle: Math.PI, targetAngle: 0, length: 280 },
-        { segments: [], baseAngle: (Math.PI * 4) / 3, targetAngle: 0, length: 280 },
-        { segments: [], baseAngle: (Math.PI * 5) / 3, targetAngle: 0, length: 280 },
-      ];
-      boss.tentacles.forEach((tentacle) => {
-        for (let i = 0; i < 16; i++) {
-          tentacle.segments.push({ x: 0, y: 0, angle: 0 });
-        }
-      });
-      enemies.push(boss);
-      return {
-        enemies,
-        bossHealth: { current: boss.health, max: boss.health },
-        playBossWarning: false,
-      };
-    }
-
-    for (let i = 0; i < 8; i++) {
-      const enemy = createEnemy(Math.random() * CANVAS_WIDTH, -50, i % 2 === 0 ? 2 : 4);
-      enemy.state = 'DIVING';
-      enemy.isDiving = true;
-      enemy.diveX = (Math.random() - 0.5) * 4;
-      enemy.diveY = 6;
-      enemies.push(enemy);
-    }
+    // Stage 4 "Chase": V-wedge formation attack.
+    // The tip (interceptor) enters first; inner scouts and outer heavies unfold on either side
+    // with staggered entry delays. Once all reach IN_FORMATION, the existing formation dive
+    // system drives coordinated leader + wingman attack runs automatically.
+    // The survival-spawn system in App.tsx fills the pressure gap as formation members are killed.
+    const cx = CANVAS_WIDTH / 2;
+    const vSlots: { fx: number; fy: number; type: number; delay: number }[] = [
+      { fx: cx,        fy: 120, type: 1, delay: 0   },  // tip — interceptor, leads the V
+      { fx: cx - 95,   fy:  90, type: 0, delay: 200 },  // left inner — scout
+      { fx: cx + 95,   fy:  90, type: 0, delay: 200 },  // right inner — scout
+      { fx: cx - 195,  fy:  62, type: 2, delay: 400 },  // left outer — heavy
+      { fx: cx + 195,  fy:  62, type: 2, delay: 400 },  // right outer — heavy
+    ];
+    vSlots.forEach(({ fx, fy, type, delay }) => {
+      // Path: [off-screen start, formation slot] — ENTERING state flies from y=-80 to fy.
+      // originX/originY (from fx/fy args) is used by IN_FORMATION lerp to hold position.
+      enemies.push(createEnemy(fx, fy, type, delay, [{ x: fx, y: -80 }, { x: fx, y: fy }]));
+    });
   } else if (stage === 5) {
     for (let i = 0; i < 15; i++) {
       enemies.push(createEnemy(50 + (i % 5) * 120, 60 + Math.floor(i / 5) * 60, i % 3));
