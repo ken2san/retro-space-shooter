@@ -852,7 +852,13 @@ export default function App() {
         });
       }
       return;
-    } else if (currentStage >= 4) {
+    } else if (currentStage === 5) {
+      // Final Front: low density — the stage challenge comes from the boss and enemy fire,
+      // not from wall density. Keep paths readable at all times.
+      wallDensity = 0.04;
+      destructibleDensity = 0.08;
+      tentacleChance = 0; // No tentacles — too much at once with boss fight
+    } else if (currentStage === 4) {
       wallDensity = 0.06 + (waveRef.current - 7) * 0.02;
       destructibleDensity = 0.12 + (waveRef.current - 7) * 0.03;
       // Chase stage: reduce tentacle chance under load
@@ -2942,7 +2948,9 @@ export default function App() {
     // Maze Generation (Canyon)
     const scrollSpeed = (currentStage === 3 ? 0.65 : 3) * worldSpeedScale;
     lastBlockRowY.current += scrollSpeed;
-    if (lastBlockRowY.current > 100) {
+    // Stage 5 spawns rows half as often — high scroll speed already brings blocks fast enough.
+    const rowSpawnThreshold = currentStage === 5 ? 200 : 100;
+    if (lastBlockRowY.current > rowSpawnThreshold) {
       lastBlockRowY.current = 0;
       generateMazeRow();
     }
@@ -3347,8 +3355,9 @@ export default function App() {
     });
     asteroids.current = asteroids.current.filter(a => a.hp > 0 && a.y < CANVAS_HEIGHT + 200 && a.y > -200 && a.x > -200 && a.x < CANVAS_WIDTH + 200);
 
-    // Update Obstacles (Sector 16+: Fortress Gates & The Core)
-    if (currentStage === 5 && !isWarping.current) {
+    // Update Obstacles (disabled in Stage 5: blocks system already provides terrain;
+    // combining both creates an unbeatable obstacle density.)
+    if (false && currentStage === 5 && !isWarping.current) {
       const now = Date.now();
       if (now - lastObstacleTime.current > 3000) {
         lastObstacleTime.current = now;
