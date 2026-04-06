@@ -142,6 +142,8 @@ export interface Obstacle {
   baseX?: number;
   vx?: number;          // horizontal patrol speed (BEAM_TURRET)
   chargeHits?: number;  // beam hits absorbed before burst (BUILDING chain reaction)
+  trackLeft?: number;   // world-x of left patrol boundary (mobile BEAM_TURRET)
+  trackRight?: number;  // world-x of max left-edge position at right boundary
 }
 
 export interface DamageNumber {
