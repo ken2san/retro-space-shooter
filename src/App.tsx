@@ -4287,6 +4287,7 @@ export default function App() {
 
       for (let j = 0; j < aliveEnemies.length; j++) {
         const enemy = aliveEnemies[j];
+        if (enemy.state === 'ENTERING') continue; // Immune while forming up (Galaga-style)
         if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
             bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
 
@@ -5986,6 +5987,11 @@ export default function App() {
 
       ctx.save();
       ctx.translate(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+
+      // Warp-in flicker: ENTERING enemies are immune to bullets — pulse to signal this
+      if (enemy.state === 'ENTERING') {
+        ctx.globalAlpha = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(drawNow / 80));
+      }
 
       if (enemy.isBoss) {
         // Boss Rendering
