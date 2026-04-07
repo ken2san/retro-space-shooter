@@ -3006,10 +3006,24 @@ export default function App() {
         if (b.isBeam) return true; // Beams are deflected by shield, not absorbed
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
         if (wallModeRef.current === 'HP_ABSORB') {
-          const healed = Math.min(100, integrityRef.current + ENERGY_WALL_HP_GAIN);
-          integrityRef.current = healed;
-          setIntegrity(healed);
-          createExplosion(b.x, b.y, '#00ffcc', 2);
+          if (integrityRef.current >= 100) {
+            // HP full: fall back to OD charge without switching mode
+            if (odReadyRef.current) {
+              activateOverdrive();
+              return false;
+            }
+            overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
+            setOverdrive(overdriveGauge.current);
+            if (overdriveGauge.current >= MAX_OVERDRIVE) {
+              flash.current = Math.max(flash.current, 0.25);
+            }
+            createExplosion(b.x, b.y, '#ffcc00', 2);
+          } else {
+            const healed = Math.min(100, integrityRef.current + ENERGY_WALL_HP_GAIN);
+            integrityRef.current = healed;
+            setIntegrity(healed);
+            createExplosion(b.x, b.y, '#00ffcc', 2);
+          }
           return false;
         }
         // OD_CHARGE (default)
@@ -4928,8 +4942,14 @@ export default function App() {
 
       if (doesShieldCatchPoint(bulletCenterX, bulletCenterY, 4)) {
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 0.9);
-          overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
-          setOverdrive(overdriveGauge.current);
+          if (wallModeRef.current === 'HP_ABSORB' && integrityRef.current < 100) {
+            const healed = Math.min(100, integrityRef.current + 1); // +1 integrity, same as energy-wall
+            integrityRef.current = healed;
+            setIntegrity(healed);
+          } else if (wallModeRef.current !== 'HP_ABSORB' || integrityRef.current >= 100) {
+            overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
+            setOverdrive(overdriveGauge.current);
+          }
           eBullets.splice(i, 1);
           continue;
       }
