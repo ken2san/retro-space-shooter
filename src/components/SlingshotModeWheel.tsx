@@ -38,7 +38,7 @@ export default function SlingshotModeWheel({ current, onSelect, onClose }: Props
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center"
+      className="fixed inset-0 z-200 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(3px)' }}
       onClick={onClose}
     >
