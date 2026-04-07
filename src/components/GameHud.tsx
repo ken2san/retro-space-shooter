@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { Zap } from 'lucide-react';
+import { SlingshotWallMode } from '../types';
 
 type GameHudProps = {
   level: number;
@@ -13,6 +14,8 @@ type GameHudProps = {
   maxOverdrive: number;
   isOverdriveActive: boolean;
   stageProgress: number;
+  wallMode: SlingshotWallMode;
+  onOpenWheel: () => void;
 };
 
 export default function GameHud({
@@ -27,6 +30,8 @@ export default function GameHud({
   maxOverdrive,
   isOverdriveActive,
   stageProgress,
+  wallMode,
+  onOpenWheel,
 }: GameHudProps) {
   return (
     <div className="w-full max-w-150 px-3 md:px-4 mb-2 md:mb-3 flex flex-col gap-1.5 md:gap-2 z-100 relative">
@@ -110,7 +115,20 @@ export default function GameHud({
                 const thresholdPct = (25 / maxOverdrive) * 100;
                 return (
                   <>
-                    <span className={`text-[8px] uppercase tracking-widest font-black transition-colors duration-300 ${labelColor}`}>{label}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[8px] uppercase tracking-widest font-black transition-colors duration-300 ${labelColor}`}>{label}</span>
+                      {/* Wall mode indicator + wheel trigger */}
+                      <button
+                        onPointerDown={(e) => { e.stopPropagation(); onOpenWheel(); }}
+                        className="flex items-center gap-0.5 px-1 py-0.5 rounded border border-white/10 bg-white/5 hover:bg-white/10 active:scale-95 transition-all"
+                        style={{ lineHeight: 1 }}
+                        title="Switch wall mode (Tab)"
+                      >
+                        <span className="text-[7px]" style={{ color: wallMode === 'OD_CHARGE' ? '#ff3366' : '#00ffcc' }}>
+                          {wallMode === 'OD_CHARGE' ? '⚡' : '✦'}
+                        </span>
+                      </button>
+                    </div>
                     <div className="w-28 md:w-36 relative">
                       {/* Wall activation threshold marker */}
                       {!isOverdriveActive && (

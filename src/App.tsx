@@ -15,11 +15,12 @@ import {
   isMobile, MAX_PARTICLES, MAX_TRAILS, MAX_BULLETS, MAX_ENEMY_BULLETS, ENABLE_SHADOWS,
 } from './constants';
 import {
-  GameState, Bullet, Enemy, Particle, Trail, PowerUp, Scrap, Asteroid,
+  GameState, SlingshotWallMode, Bullet, Enemy, Particle, Trail, PowerUp, Scrap, Asteroid,
   BossType, Obstacle, DamageNumber, TailSegment, Drone,
 } from './types';
 import NeonShip from './components/NeonShip';
 import GameHud from './components/GameHud';
+import SlingshotModeWheel from './components/SlingshotModeWheel';
 import StageTitleOverlay from './components/StageTitleOverlay';
 import TutorialOverlay from './components/TutorialOverlay';
 import { buildWaveEnemies, createEnemy } from './game/enemies';
@@ -123,6 +124,10 @@ export default function App() {
   const [integrity, setIntegrity] = useState(100);
   const lastContinuousSpawnTime = useRef(0);
   const integrityRef = useRef(100);
+  const [wallMode, setWallMode] = useState<SlingshotWallMode>('OD_CHARGE');
+  const wallModeRef = useRef<SlingshotWallMode>('OD_CHARGE');
+  const [isWheelOpen, setIsWheelOpen] = useState(false);
+  const isWheelOpenRef = useRef(false);
   const [level, setLevel] = useState(1);
   const [xp, setXp] = useState(0);
   const [xpToNextLevel, setXpToNextLevel] = useState(200);
@@ -1191,6 +1196,14 @@ export default function App() {
         startNextWave();
       }
 
+      // Tab: open/close wall mode wheel
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        if (gameState !== 'PLAYING') return;
+        isWheelOpenRef.current ? closeWheel() : openWheel();
+        return;
+      }
+
       // Allow Ctrl to trigger Slingshot Mode during an active drag
       if (!e.repeat && (e.code === 'ControlLeft' || e.code === 'ControlRight') && isMouseDown.current && !isSlingshotMode.current) {
         markInputActivity();
@@ -2097,6 +2110,23 @@ export default function App() {
     activeEffects.current['SHIELD'] = Math.max(activeEffects.current['SHIELD'] || 0, Date.now() + 3000);
   };
 
+  const openWheel = () => {
+    if (isWheelOpenRef.current) return;
+    isWheelOpenRef.current = true;
+    pauseStartTime.current = Date.now();
+    setIsWheelOpen(true);
+  };
+
+  const closeWheel = () => {
+    if (!isWheelOpenRef.current) return;
+    if (isOverdriveActiveRef.current && pauseStartTime.current > 0) {
+      overdriveEndTime.current += (Date.now() - pauseStartTime.current);
+    }
+    pauseStartTime.current = 0;
+    isWheelOpenRef.current = false;
+    setIsWheelOpen(false);
+  };
+
   // Game Loop
   const update = () => {
     // Hit stop logic
@@ -2154,7 +2184,7 @@ export default function App() {
     // Add beat pulse to trippy intensity
     const effectiveTrippy = trippyIntensity.current + pulseRef.current * 0.15 * trippyIntensity.current;
 
-    if (gameState !== 'PLAYING' || showUpgrade) return;
+    if (gameState !== 'PLAYING' || showUpgrade || isWheelOpenRef.current) return;
 
     // Cache relic lookups — avoids O(n × relics) cost inside enemy/bullet loops
     const hasEMP        = relicsRef.current.some(r => r.id === 'EMP');
@@ -2971,9 +3001,18 @@ export default function App() {
     // Guard window (post-release) intentionally excluded: absorption requires active drag.
     if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
       const ENERGY_WALL_BULLET_GAIN = 2; // ~50 bullets to full; each of 4 stages = ~12 bullets
+      const ENERGY_WALL_HP_GAIN = 1;     // +1 integrity per bullet absorbed in HP_ABSORB mode
       enemyBullets.current = enemyBullets.current.filter(b => {
         if (b.isBeam) return true; // Beams are deflected by shield, not absorbed
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
+        if (wallModeRef.current === 'HP_ABSORB') {
+          const healed = Math.min(100, integrityRef.current + ENERGY_WALL_HP_GAIN);
+          integrityRef.current = healed;
+          setIntegrity(healed);
+          createExplosion(b.x, b.y, '#00ffcc', 2);
+          return false;
+        }
+        // OD_CHARGE (default)
         if (odReadyRef.current) {
           activateOverdrive();
           return false;
@@ -7273,7 +7312,18 @@ export default function App() {
         maxOverdrive={MAX_OVERDRIVE}
         isOverdriveActive={isOverdriveActive}
         stageProgress={stageProgress}
+        wallMode={wallMode}
+        onOpenWheel={openWheel}
       />
+
+      {/* Wall mode selection wheel — opens on Tab (PC) or HUD button (mobile) */}
+      {isWheelOpen && (
+        <SlingshotModeWheel
+          current={wallMode}
+          onSelect={(mode) => { setWallMode(mode); wallModeRef.current = mode; }}
+          onClose={closeWheel}
+        />
+      )}
 
       {/* Game Canvas Container with Ambient Glow and Scanlines */}
       <div
