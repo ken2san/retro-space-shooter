@@ -1,5 +1,7 @@
 export type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY' | 'STAGE_CLEAR' | 'UPGRADE' | 'RELIC_SELECT';
 
+export type SlingshotWallMode = 'OD_CHARGE' | 'HP_ABSORB';
+
 export interface Bullet {
   x: number;
   y: number;

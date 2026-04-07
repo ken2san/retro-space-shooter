@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { Zap } from 'lucide-react';
+import { SlingshotWallMode } from '../types';
 
 type GameHudProps = {
   level: number;
@@ -13,6 +14,9 @@ type GameHudProps = {
   maxOverdrive: number;
   isOverdriveActive: boolean;
   stageProgress: number;
+  wallMode: SlingshotWallMode;
+  onOpenWheel: () => void;
+  showWallMode: boolean;
 };
 
 export default function GameHud({
@@ -27,6 +31,9 @@ export default function GameHud({
   maxOverdrive,
   isOverdriveActive,
   stageProgress,
+  wallMode,
+  onOpenWheel,
+  showWallMode,
 }: GameHudProps) {
   return (
     <div className="w-full max-w-150 px-3 md:px-4 mb-2 md:mb-3 flex flex-col gap-1.5 md:gap-2 z-100 relative">
@@ -136,6 +143,26 @@ export default function GameHud({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Wall mode button — centered row between HUD and sector bar, only during gameplay */}
+      <div className={`flex justify-center transition-all duration-300 ${showWallMode ? 'opacity-100' : 'opacity-0 pointer-events-none h-0 overflow-hidden'}`}>
+        <button
+          onPointerDown={e => { e.stopPropagation(); onOpenWheel(); }}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/15 bg-black/60 hover:bg-white/10 active:scale-95 transition-all"
+          title="Switch wall mode (Tab)"
+        >
+          <span
+            className="text-lg md:text-xl leading-none"
+            style={{ color: wallMode === 'OD_CHARGE' ? '#ff3366' : '#00ffcc', filter: `drop-shadow(0 0 5px ${wallMode === 'OD_CHARGE' ? '#ff3366' : '#00ffcc'})` }}
+          >
+            {wallMode === 'OD_CHARGE' ? '⚡' : '✦'}
+          </span>
+          <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest" style={{ color: wallMode === 'OD_CHARGE' ? '#ff336699' : '#00ffcc99' }}>
+            {wallMode === 'OD_CHARGE' ? 'Overdrive' : 'Repair'}
+          </span>
+          <span className="text-[7px] text-white/25 uppercase tracking-widest">Wall Mode</span>
+        </button>
       </div>
 
       <div className="w-full h-0.75 bg-white/5 relative overflow-hidden rounded-full mt-1">
