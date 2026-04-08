@@ -3002,43 +3002,54 @@ export default function App() {
     if (shieldState.active && !isSlingshotAttacking && !isOverdriveActiveRef.current && isSlingshotMode.current && isDragging) {
       const ENERGY_WALL_BULLET_GAIN = 2; // ~50 bullets to full; each of 4 stages = ~12 bullets
       const ENERGY_WALL_HP_GAIN = 1;     // +1 integrity per bullet absorbed in HP_ABSORB mode
+      // Track accumulated changes so we can batch React state updates after the filter.
+      // Calling setOverdrive/setIntegrity per-bullet during a dense boss volley causes
+      // 30–50 re-renders per drag, which stalls the game loop on mobile.
+      let odGainedThisPass = 0;
+      let hpGainedThisPass = 0;
+      let overdriveFiredThisPass = false;
       enemyBullets.current = enemyBullets.current.filter(b => {
         if (b.isBeam) return true; // Beams are deflected by shield, not absorbed
         if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
         if (wallModeRef.current === 'HP_ABSORB') {
           if (integrityRef.current >= 100) {
             // HP full: fall back to OD charge without switching mode
-            if (odReadyRef.current) {
+            if (odReadyRef.current && !overdriveFiredThisPass) {
+              overdriveFiredThisPass = true;
               activateOverdrive();
               return false;
             }
             overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
-            setOverdrive(overdriveGauge.current);
+            odGainedThisPass += ENERGY_WALL_BULLET_GAIN;
             if (overdriveGauge.current >= MAX_OVERDRIVE) {
               flash.current = Math.max(flash.current, 0.25);
             }
             createExplosion(b.x, b.y, '#ffcc00', 2);
           } else {
             const healed = Math.min(100, integrityRef.current + ENERGY_WALL_HP_GAIN);
+            hpGainedThisPass += healed - integrityRef.current;
             integrityRef.current = healed;
-            setIntegrity(healed);
             createExplosion(b.x, b.y, '#00ffcc', 2);
           }
           return false;
         }
         // OD_CHARGE (default)
-        if (odReadyRef.current) {
+        if (odReadyRef.current && !overdriveFiredThisPass) {
+          overdriveFiredThisPass = true;
           activateOverdrive();
           return false;
         }
         overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
-        setOverdrive(overdriveGauge.current);
+        odGainedThisPass += ENERGY_WALL_BULLET_GAIN;
         if (overdriveGauge.current >= MAX_OVERDRIVE) {
           flash.current = Math.max(flash.current, 0.25);
         }
         createExplosion(b.x, b.y, '#ffcc00', 2);
         return false;
       });
+      // Flush batched state updates — one React render instead of one per bullet.
+      if (odGainedThisPass > 0) setOverdrive(overdriveGauge.current);
+      if (hpGainedThisPass > 0) setIntegrity(integrityRef.current);
       odReadyRef.current = overdriveGauge.current >= MAX_OVERDRIVE && !isOverdriveActiveRef.current;
     }
 
@@ -4423,8 +4434,11 @@ export default function App() {
 
     // Final Separation Pass (Post-movement)
     // This ensures enemies don't overlap even if their formulas try to put them in the same spot
-    // On mobile, run every other frame — visual difference is imperceptible; saves O(n²) work.
-    if (!isMobile || frameCounterRef.current % 2 === 0) enemies.current.forEach((enemy) => {
+    // Mobile: skip every other frame at tier 0–1; skip entirely at tier 2 (saves O(n²) work).
+    const runSeparation = !isMobile
+      ? true
+      : isCriticalSim ? false : frameCounterRef.current % 2 === 0;
+    if (runSeparation) enemies.current.forEach((enemy) => {
       if (!enemy.alive || enemy.state === 'ENTERING' || enemy.isBoss) return;
 
       enemies.current.forEach((other) => {
@@ -7229,6 +7243,7 @@ export default function App() {
       const p95Frame = getPercentile(frameTimeSamplesMs.current, 95);
 
       // Adaptive quality control with hysteresis: reduce expensive full-screen effects only when needed.
+      // Mobile thresholds are tighter: GPU/CPU runs hotter and thermal throttling kicks in earlier.
       const prevTier = renderLoadTierRef.current;
       let nextTier = prevTier;
       const isChaseStage = currentStage === 4;
@@ -7236,18 +7251,18 @@ export default function App() {
 
       // Final Front sector 2 boss gets the earliest downgrade because its beam pass is expensive.
       if (isFinalLaserBossActive) {
-        if (p95Frame > 34) nextTier = 2;
-        else if (p95Frame > 26) nextTier = 1;
-        else if (p95Frame < 20) nextTier = 0;
+        if (p95Frame > (isMobile ? 28 : 34)) nextTier = 2;
+        else if (p95Frame > (isMobile ? 22 : 26)) nextTier = 1;
+        else if (p95Frame < (isMobile ? 18 : 20)) nextTier = 0;
       } else if (isChaseStage) {
-        if (p95Frame > 42) nextTier = 2;
-        else if (p95Frame > 32) nextTier = 1;
-        else if (p95Frame < 24) nextTier = 0;
+        if (p95Frame > (isMobile ? 36 : 42)) nextTier = 2;
+        else if (p95Frame > (isMobile ? 28 : 32)) nextTier = 1;
+        else if (p95Frame < (isMobile ? 20 : 24)) nextTier = 0;
       } else {
-        // Other stages: original thresholds
-        if (p95Frame > 48) nextTier = 2;
-        else if (p95Frame > 36) nextTier = 1;
-        else if (p95Frame < 28) nextTier = 0;
+        // Other stages — mobile escalates at 28ms (tier 1) / 38ms (tier 2) vs desktop 36/48ms
+        if (p95Frame > (isMobile ? 38 : 48)) nextTier = 2;
+        else if (p95Frame > (isMobile ? 28 : 36)) nextTier = 1;
+        else if (p95Frame < (isMobile ? 22 : 28)) nextTier = 0;
       }
       renderLoadTierRef.current = nextTier;
 
