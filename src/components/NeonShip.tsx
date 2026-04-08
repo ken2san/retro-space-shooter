@@ -27,8 +27,6 @@ const NeonShip = memo(({ className = "", tension = 0 }: { className?: string, te
       <animate attributeName="opacity" values="0.4;0.8;0.4" dur="0.2s" repeatCount="indefinite" />
     </circle>
   </svg>
-);
-
 ));
 
 export default NeonShip;
