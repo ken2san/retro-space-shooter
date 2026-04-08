@@ -5447,6 +5447,8 @@ export default function App() {
     // Parallax Starfield
     const currentStage = getStageFromWave(waveRef.current);
     const drawNow = Date.now();
+    // Cache shield state once — reused throughout draw() to avoid redundant function calls per frame.
+    const slingshotShieldStateCache = getSlingshotShieldState(drawNow);
     const drawLoadTier = renderLoadTierRef.current;
     const isReducedBossFx = drawLoadTier >= 1;
     const isMinimalBossFx = drawLoadTier >= 2;
@@ -5529,7 +5531,7 @@ export default function App() {
     ctx.lineWidth = 1;
     const gridSpacing = isFinalFrontStage ? (isMobile ? 96 : 56) : (isMobile ? 80 : 40); // Reduce visual density in Final Front
     const gridSpeed = isWarping.current ? 100 : 20;
-    const gridOffset = (Date.now() / gridSpeed) % gridSpacing;
+    const gridOffset = (drawNow / gridSpeed) % gridSpacing;
 
     // Skip grid entirely on mobile under load — low visual impact, non-trivial CPU cost
     if (!isMobile || drawLoadTier === 0) {
@@ -5679,8 +5681,8 @@ export default function App() {
     scraps.current.forEach(s => {
       ctx.save();
       ctx.translate(s.x, s.y);
-      ctx.shadowBlur = 10 * shadowScale;
-      ctx.shadowColor = '#00ffcc';
+      // Scraps are 2px dots — shadow is invisible on mobile and costs shadow-blur per dot.
+      if (!isMobile) { ctx.shadowBlur = 10; ctx.shadowColor = '#00ffcc'; }
       ctx.fillStyle = '#00ffcc';
       ctx.beginPath();
       ctx.arc(0, 0, 2, 0, Math.PI * 2);
@@ -5692,7 +5694,7 @@ export default function App() {
     powerUps.current.forEach(p => {
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(Date.now() / 500);
+      ctx.rotate(drawNow / 500);
       const color = p.type === 'MULTISHOT'
         ? '#ffcc00'
         : p.type === 'SHIELD'
@@ -6291,7 +6293,7 @@ export default function App() {
         ctx.restore();
       }
 
-      const slingshotShieldState = getSlingshotShieldState(Date.now());
+      const slingshotShieldState = slingshotShieldStateCache;
       if (slingshotShieldState.active) {
         ctx.save();
         ctx.rotate(slingshotShieldState.angle - playerTilt.current);
@@ -6484,7 +6486,8 @@ export default function App() {
     });
     ctx.shadowBlur = 0;
 
-    // Enemies
+    // Enemies — color array hoisted outside loop to avoid per-enemy allocation.
+    const drawEnemyColors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
     enemies.current.forEach((enemy) => {
       if (!enemy.alive) return;
 
@@ -6771,8 +6774,7 @@ export default function App() {
       }
       ctx.rotate(angle);
 
-      const colors = ['#ffcc00', '#ff33cc', '#33ccff', '#ff0000'];
-      const color = colors[enemy.type] || '#ffcc00';
+      const color = drawEnemyColors[enemy.type] || '#ffcc00';
 
       ctx.shadowBlur = 15 * shadowScale;
       ctx.shadowColor = color;
@@ -6791,7 +6793,7 @@ export default function App() {
 
         // Core
         ctx.fillStyle = '#ffffff';
-        ctx.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.3;
+        ctx.globalAlpha = 0.5 + Math.sin(drawNow / 100) * 0.3;
         ctx.beginPath();
         ctx.arc(0, 0, 3, 0, Math.PI * 2);
         ctx.fill();
@@ -6862,7 +6864,7 @@ export default function App() {
 
         // Inner Pulse
         ctx.beginPath();
-        ctx.arc(0, 0, 8 + Math.sin(Date.now() / 100) * 4, 0, Math.PI * 2);
+        ctx.arc(0, 0, 8 + Math.sin(drawNow / 100) * 4, 0, Math.PI * 2);
         ctx.stroke();
 
         // Health Bar for Elite
@@ -6879,7 +6881,7 @@ export default function App() {
         const shieldColor = '#33ccff';
         ctx.strokeStyle = shieldColor;
         ctx.shadowColor = shieldColor;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 10 * shadowScale;
         ctx.lineWidth = 2;
 
         // Body
@@ -6926,7 +6928,7 @@ export default function App() {
       ctx.translate(dx, dy);
       ctx.rotate(drone.angle + Math.PI / 2);
 
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 10 * shadowScale;
       ctx.shadowColor = '#00ffcc';
       ctx.strokeStyle = '#00ffcc';
       ctx.lineWidth = 2;
@@ -7188,7 +7190,7 @@ export default function App() {
 
     // Ambush Warning removed
     const isTimeBasedStage = isSurvivalStage(currentStage);
-    const shieldFxActive = getSlingshotShieldState(Date.now()).active;
+    const shieldFxActive = slingshotShieldStateCache.active;
 
     // Final Post-Processing to Main Canvas
     mainCtx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
