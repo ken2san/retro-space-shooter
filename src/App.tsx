@@ -5194,7 +5194,11 @@ export default function App() {
       if (!stageStartTime.current) stageStartTime.current = Date.now();
       const elapsed = (Date.now() - stageStartTime.current) / 1000;
       const timeLeft = Math.max(0, survivalDuration - Math.floor(elapsed));
-      setSurvivalTime(timeLeft);
+      // Only call setState when the displayed second actually changes (integer value).
+      if (timeLeft !== survivalTimerRef.current) {
+        survivalTimerRef.current = timeLeft;
+        setSurvivalTime(timeLeft);
+      }
 
       if (currentTime - lastProgressUiUpdateAt.current > 120) {
         setStageProgress(Math.min(1, elapsed / survivalDuration));
