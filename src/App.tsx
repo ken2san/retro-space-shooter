@@ -6957,7 +6957,7 @@ export default function App() {
 
     // Nebula Pass Effect (boss/late-stage ambience only when trippy is active)
     const nebulaFrameDivisor = renderLoadTierRef.current === 0 ? 1 : renderLoadTierRef.current === 1 ? 2 : 3;
-    const shouldRenderNebula = Math.floor(Date.now() / 16) % nebulaFrameDivisor === 0;
+    const shouldRenderNebula = Math.floor(drawNow / 16) % nebulaFrameDivisor === 0;
     if (trippyIntensity.current > 0.05 && shouldRenderNebula) {
       ctx.save();
       const time = Date.now() / 2000;
