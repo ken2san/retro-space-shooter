@@ -2279,7 +2279,7 @@ export default function App() {
     // Spawn Asteroids
     if ((isAsteroidBelt || isFinalFront) && !isWarping.current) {
       const spawnRate = isAsteroidBelt ? (isMobile ? 0.006 : 0.014) : (isMobile ? 0.008 : 0.02);
-      const maxAsteroids = isAsteroidBelt ? (isMobile ? 8 : 12) : 999;
+      const maxAsteroids = isAsteroidBelt ? (isMobile ? 8 : 12) : (isMobile ? 12 : 20);
       if (asteroids.current.length < maxAsteroids && Math.random() < spawnRate) {
         const rawSize = 30 + Math.random() * 60;
         const sizeScale = isAsteroidBelt ? (isMobile ? 0.72 : 0.86) : 1;
@@ -3483,14 +3483,20 @@ export default function App() {
     blocks.current = blocks.current.filter(b => b.y < CANVAS_HEIGHT + 100);
 
     asteroids.current.forEach(a => {
+      // Skip dead or far-off-screen asteroids — the filter below will clean them up next tick.
+      if (a.hp <= 0) return;
+      const margin = a.size + 50;
+      if (a.y > CANVAS_HEIGHT + margin || a.y < -margin || a.x < -margin || a.x > CANVAS_WIDTH + margin) return;
+
       // Movement with inertia
       a.x += (a.dx + a.vx) * worldSpeedScale * dt;
       a.y += (a.speed + a.vy) * worldSpeedScale * dt;
       a.rotation += a.vr * worldSpeedScale * dt;
 
-      // Friction for vx/vy
-      a.vx *= Math.pow(0.98, dt);
-      a.vy *= Math.pow(0.98, dt);
+      // Friction for vx/vy — linear approximation of pow(0.98, dt); exact at dt=1, accurate within 0.3% for dt<3.
+      const friction = 1 - 0.02 * dt;
+      a.vx *= friction;
+      a.vy *= friction;
 
       // Repulsion Field (Passive)
       // If player is close, push asteroid away slowly
@@ -3541,15 +3547,17 @@ export default function App() {
         }
       }
 
-      // Collision with enemies (Kinetic Weapon)
+      // Collision with enemies (Kinetic Weapon) — skip if asteroid is barely moving
+      const combinedVelCheck = a.vx * a.vx + a.vy * a.vy;
       enemies.current.forEach(e => {
         if (!e.alive) return;
+        if (combinedVelCheck < 1) return; // too slow to deal damage, skip
         const edx = e.x + e.width / 2 - a.x;
         const edy = e.y + e.height / 2 - a.y;
         const edist = Math.sqrt(edx * edx + edy * edy);
-        const combinedVel = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
 
-        if (edist < a.size + e.width / 2 && combinedVel > 1) {
+        if (edist < a.size + e.width / 2) {
+          const combinedVel = Math.sqrt(combinedVelCheck);
           const damage = Math.floor(combinedVel * a.size * 0.5);
           e.health! -= damage;
           createExplosion(e.x + e.width / 2, e.y + e.height / 2, '#ffffff', 10);
@@ -3564,10 +3572,12 @@ export default function App() {
         }
       });
 
-      // Collision with bullets
+      // Collision with bullets — early-out if bullet is far from asteroid bounds
       bullets.current.forEach(b => {
+        if (b.y < -10) return; // already removed bullet
         const bdx = b.x - a.x;
         const bdy = b.y - a.y;
+        if (Math.abs(bdx) > a.size || Math.abs(bdy) > a.size) return; // cheap AABB pre-check
         const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
         if (bdist < a.size) {
           a.hp -= (b.damage || 1);
