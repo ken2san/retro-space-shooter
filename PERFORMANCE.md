@@ -1,6 +1,6 @@
 # NEON DEFENDER — Performance Notes
 
-_Last updated: 2026-04-09 (session 4)_
+_Last updated: 2026-04-09 (session 5)_
 
 > **Usage**: Update "Current State" at the end of each session so the next session
 > can start here instead of reading conversation history.
@@ -10,7 +10,7 @@ _Last updated: 2026-04-09 (session 4)_
 ## Current State
 
 **Branch**: `perf/speed-polish-2`
-**Last commit**: `da4d092` — fix: add no-store header for index.html
+**Last commit**: `40f97fa` — perf: boss sim gating — cap laser collision to 2 beams at tier>=1, fix SWARM filter GC
 **Build**: passing (TSC clean, Vite build OK)
 **Firebase**: deployed and live
 
@@ -31,9 +31,9 @@ _Last updated: 2026-04-09 (session 4)_
 
 **Open issues / known bugs**:
 
-- Boss fight still noticeably heavy on mobile — candidate fixes documented below (§0)
+- Boss fight still slightly heavy on mobile (laser phase 3 full-canvas strokes remain the likely bottleneck)
 
-**Next task**: Boss simulation tier gating (§0)
+**Next task**: Measure boss fight frame time on device before adding more fixes
 
 ---
 
@@ -134,15 +134,27 @@ bullets alive), this produced constant heap allocation and GC pauses.
 
 ### Scrap render artifact (cyan polygon)
 
-| Fix                                                                               | Cause                                                                                                   |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Fix                                                                              | Cause                                                                                                                   |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | Restore `ctx.moveTo(s.x + 2, s.y)` before each `ctx.arc()` in scrap batch render | Missing `moveTo` caused Canvas 2D to implicitly draw `lineTo` between arcs, connecting all dots into one filled polygon |
+
+### Boss sim gating — LASER phase-3 beam cap
+
+| Fix                                                                                           | Cause                                                                                                |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Cap sim collision to 2 beams at `isReducedSim` (tier ≥1): `(phase===3 && !isReducedSim)?4:2` | Phase-3 ran 4 collision checks (Math.sqrt + Math.atan2 each) while render only drew 2 — invisible beam hits |
+
+### Boss sim gating — SWARM liveSubCount filter GC
+
+| Fix                                                                             | Cause                                                                                   |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Replace `enemies.current.filter(e => e.alive && !e.isBoss).length` with manual count loop | Creates ephemeral array every frame while SWARM boss is alive (wave 8) |
 
 ### iOS Home Screen shortcut serving stale JS
 
-| Fix                                                                   | Cause                                                                                         |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Add `Cache-Control: no-store` for `/index.html` in `firebase.json`    | iOS caches PWA/shortcut `index.html` indefinitely; Vite hash-busts JS but not the HTML entry point |
+| Fix                                                                | Cause                                                                                              |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Add `Cache-Control: no-store` for `/index.html` in `firebase.json` | iOS caches PWA/shortcut `index.html` indefinitely; Vite hash-busts JS but not the HTML entry point |
 
 ### Scrap magnet sqrt elimination
 
