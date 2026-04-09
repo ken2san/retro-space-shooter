@@ -4151,7 +4151,11 @@ export default function App() {
             }
           } else if (enemy.bossType === BossType.SWARM) {
             // Spawns small fast enemies (capped to avoid runaway array growth)
-            const liveSubCount = enemies.current.filter(e => e.alive && !e.isBoss).length;
+            let liveSubCount = 0;
+            for (let si = 0; si < enemies.current.length; si++) {
+              const e = enemies.current[si];
+              if (e.alive && !e.isBoss) liveSubCount++;
+            }
             if (liveSubCount < 8 && currentTime - (enemy.lastShotTime || 0) > (enemy.phase === 3 ? 1400 : 2600)) {
               enemy.lastShotTime = currentTime;
               for (let i = 0; i < 2; i++) {
@@ -4259,7 +4263,9 @@ export default function App() {
             const loadAdjustedRotationSpeed = laserRotationSpeed;
             enemy.tractorBeamTimer += dt * (1000 / 60) * timeScale.current * loadAdjustedRotationSpeed;
             const angle = (enemy.tractorBeamTimer / 1000) * Math.PI;
-            const laserCount = enemy.phase === 3 ? 4 : 2;
+            // At reduced sim tier, cap to 2 beams — matches the render cap so player
+            // is never hit by beams that are not drawn.
+            const laserCount = (enemy.phase === 3 && !isReducedSim) ? 4 : 2;
 
             for (let i = 0; i < laserCount; i++) {
               const laserAngle = angle + (i * Math.PI * 2 / laserCount);
