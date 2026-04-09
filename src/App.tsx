@@ -5764,6 +5764,7 @@ export default function App() {
       for (let si = 0; si < scraps.current.length; si++) {
         const s = scraps.current[si];
         if (!s.alive) continue;
+        ctx.moveTo(s.x + 2, s.y);
         ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
       }
       ctx.fill();
