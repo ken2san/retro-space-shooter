@@ -3,6 +3,7 @@ export type GameState = 'LOADING' | 'START' | 'PLAYING' | 'GAME_OVER' | 'VICTORY
 export type SlingshotWallMode = 'OD_CHARGE' | 'HP_ABSORB';
 
 export interface Bullet {
+  alive?: boolean;
   x: number;
   y: number;
   vx?: number;
@@ -100,6 +101,7 @@ export interface PowerUp {
 }
 
 export interface Scrap {
+  alive?: boolean;
   x: number;
   y: number;
   vx: number;

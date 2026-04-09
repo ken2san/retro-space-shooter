@@ -112,6 +112,41 @@ const REPAIR_POWERUP_LOW_HP_MULTIPLIER = 1.5;
 const REPAIR_POWERUP_DROP_COOLDOWN_MS = 10000;
 const REPAIR_POWERUP_MAX_DURING_BOSS = 1;
 
+/** Claims the first dead slot in pool and assigns bullet data. Returns false if pool is full. */
+function spawnBullet(
+  pool: Bullet[],
+  data: { x: number; y: number; vx?: number; vy?: number; damage?: number; size?: number; color?: string; isHoming?: boolean; isBeam?: boolean; deflected?: boolean; bounces?: number }
+): boolean {
+  for (let i = 0; i < pool.length; i++) {
+    if (!pool[i].alive) {
+      const b = pool[i];
+      b.alive = true; b.x = data.x; b.y = data.y;
+      b.vx = data.vx; b.vy = data.vy; b.damage = data.damage;
+      b.size = data.size; b.color = data.color;
+      b.isHoming = data.isHoming; b.isBeam = data.isBeam;
+      b.deflected = data.deflected; b.bounces = data.bounces;
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Claims the first dead slot in pool and assigns scrap data. Returns false if pool is full. */
+function spawnScrap(
+  pool: Scrap[],
+  data: { x: number; y: number; vx: number; vy: number; life: number }
+): boolean {
+  for (let i = 0; i < pool.length; i++) {
+    if (!pool[i].alive) {
+      const s = pool[i];
+      s.alive = true; s.x = data.x; s.y = data.y;
+      s.vx = data.vx; s.vy = data.vy; s.life = data.life;
+      return true;
+    }
+  }
+  return false;
+}
+
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasScaleRef = useRef(1); // rect.height / CANVAS_HEIGHT — updated in pointer event handlers
@@ -174,8 +209,12 @@ export default function App() {
   const isDualFighter = useRef(false);
   const isHacked = useRef(false);
   const hackStartTime = useRef(0);
-  const bullets = useRef<Bullet[]>([]);
-  const enemyBullets = useRef<Bullet[]>([]);
+  const bullets = useRef<Bullet[]>(
+    Array.from({ length: MAX_BULLETS }, () => ({ alive: false as boolean | undefined, x: 0, y: 0 }))
+  );
+  const enemyBullets = useRef<Bullet[]>(
+    Array.from({ length: MAX_ENEMY_BULLETS }, () => ({ alive: false as boolean | undefined, x: 0, y: 0 }))
+  );
   const enemies = useRef<Enemy[]>([]);
   const firepowerRef = useRef(1);
   const speedRef = useRef(1);
@@ -281,7 +320,9 @@ export default function App() {
 
   // Warp Transition State
   const isWarping = useRef(false);
-  const scraps = useRef<Scrap[]>([]);
+  const scraps = useRef<Scrap[]>(
+    Array.from({ length: isMobile ? 100 : 250 }, () => ({ alive: false as boolean | undefined, x: 0, y: 0, vx: 0, vy: 0, life: 0 }))
+  );
   const asteroids = useRef<Asteroid[]>([]);
   const obstacles = useRef<Obstacle[]>([]);
   const lastObstacleTime = useRef(0);
@@ -739,7 +780,7 @@ export default function App() {
     survivalTimerRef.current = getSurvivalDurationFromStage(stage);
     setSurvivalTime(getSurvivalDurationFromStage(stage));
     blocks.current = [];
-    scraps.current = [];
+    for (const s of scraps.current) s.alive = false;
     asteroids.current = [];
 
     setWaveTitle(true);
@@ -1117,14 +1158,14 @@ export default function App() {
     slingshotObstacleKickAt.current = 0;
     playerPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
     targetPos.current = { x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2, y: CANVAS_HEIGHT - 80 };
-    bullets.current = [];
-    enemyBullets.current = [];
+    for (const b of bullets.current) b.alive = false;
+    for (const b of enemyBullets.current) b.alive = false;
     particles.current = [];
     trails.current = [];
     powerUps.current = [];
     lastRepairDropAt.current = 0;
     repairDropsDuringBossRef.current = 0;
-    scraps.current = [];
+    for (const s of scraps.current) s.alive = false;
     asteroids.current = [];
     blocks.current = [];
     obstacles.current = [];
@@ -1709,10 +1750,11 @@ export default function App() {
 
         const shockwaveRadius = 150 + (totalPower * 200);
         enemyBullets.current.forEach(b => {
+          if (!b.alive) return;
           const bdx = b.x - centerX;
           const bdy = b.y - centerY;
           if (Math.sqrt(bdx*bdx + bdy*bdy) < shockwaveRadius) {
-            b.y = -100;
+            b.alive = false;
             if (!isMobile) createExplosion(b.x, b.y, '#ffffff', 3);
           }
         });
@@ -2242,12 +2284,6 @@ export default function App() {
 
     // Keep object counts within a soft budget when frame time worsens.
     // Mobile caps are tighter to match MAX_ENEMY_BULLETS / MAX_PARTICLES constants.
-    const enemyBulletCap = isMobile
-      ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
-      : (isCriticalSim ? 140 : isReducedSim ? 200 : 260);
-    if (enemyBullets.current.length > enemyBulletCap) {
-      enemyBullets.current.splice(0, enemyBullets.current.length - enemyBulletCap);
-    }
     const particleCap = isMobile
       ? (isCriticalSim ? 80  : isReducedSim ? 120 : 150)
       : (isCriticalSim ? 520 : isReducedSim ? 760 : 1000);
@@ -2353,7 +2389,7 @@ export default function App() {
       if (gameState === 'PLAYING') {
         const wingmanNow = Date.now();
         if (wingmanNow - lastShotTime.current > (isOverdriveActiveRef.current ? 75 : 150)) {
-          bullets.current.push({
+          spawnBullet(bullets.current, {
             x: wingmanPos.current.x + PLAYER_WIDTH / 2 - 2,
             y: wingmanPos.current.y,
             vx: 0, vy: -10, damage: firepowerRef.current, color: '#ff33cc'
@@ -2362,19 +2398,21 @@ export default function App() {
       }
 
       // Wingman collision with enemy bullets
-      enemyBullets.current.forEach((bullet, idx) => {
-        if (!wingmanRef.current) return;
+      for (let _wi = 0; _wi < enemyBullets.current.length; _wi++) {
+        const bullet = enemyBullets.current[_wi];
+        if (!bullet.alive) continue;
+        if (!wingmanRef.current) break;
         const dx = bullet.x - (wingmanPos.current.x + PLAYER_WIDTH / 2);
         const dy = bullet.y - (wingmanPos.current.y + PLAYER_HEIGHT / 2);
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < 15) {
-          enemyBullets.current.splice(idx, 1);
+          bullet.alive = false;
           createExplosion(wingmanPos.current.x + PLAYER_WIDTH / 2, wingmanPos.current.y + PLAYER_HEIGHT / 2, '#ff33cc', 30);
           audio.playExplosion(wingmanPos.current.x);
           setHasWingman(false);
           wingmanRef.current = false;
         }
-      });
+      }
 
       // Wingman collision with enemies
       if (wingmanRef.current) {
@@ -2595,7 +2633,7 @@ export default function App() {
           // Drop scrap during ramming
           const scrapCount = isOverdriveActiveRef.current ? 5 : 1;
           for (let i = 0; i < scrapCount; i++) {
-            scraps.current.push({
+            spawnScrap(scraps.current, {
               x: enemy.x + enemy.width / 2,
               y: enemy.y + enemy.height / 2,
               vx: (Math.random() - 0.5) * 8,
@@ -2675,8 +2713,9 @@ export default function App() {
 
     // Update Scraps
     const sList = scraps.current;
-    for (let i = sList.length - 1; i >= 0; i--) {
+    for (let i = 0; i < sList.length; i++) {
       const s = sList[i];
+      if (!s.alive) continue;
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - s.x;
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - s.y;
       const distSq = dx * dx + dy * dy;
@@ -2701,7 +2740,7 @@ export default function App() {
       }
 
       if (s.y >= CANVAS_HEIGHT || s.life <= 0) {
-        sList.splice(i, 1);
+        s.alive = false;
       }
     }
 
@@ -2717,7 +2756,7 @@ export default function App() {
         drone.lastShot = now;
         const dx = playerPos.current.x + PLAYER_WIDTH / 2 + Math.cos(drone.angle) * drone.distance;
         const dy = playerPos.current.y + PLAYER_HEIGHT / 2 + Math.sin(drone.angle) * drone.distance;
-        bullets.current.push({
+        spawnBullet(bullets.current, {
           x: dx,
           y: dy,
           vx: 0,
@@ -3018,16 +3057,18 @@ export default function App() {
       let odGainedThisPass = 0;
       let hpGainedThisPass = 0;
       let overdriveFiredThisPass = false;
-      enemyBullets.current = enemyBullets.current.filter(b => {
-        if (b.isBeam) return true; // Beams are deflected by shield, not absorbed
-        if (!doesShieldCatchPoint(b.x, b.y, 20)) return true;
+      for (let _ebi = 0; _ebi < enemyBullets.current.length; _ebi++) {
+        const b = enemyBullets.current[_ebi];
+        if (!b.alive) continue;
+        if (b.isBeam) continue; // Beams are deflected by shield, not absorbed
+        if (!doesShieldCatchPoint(b.x, b.y, 20)) continue;
         if (wallModeRef.current === 'HP_ABSORB') {
           if (integrityRef.current >= 100) {
             // HP full: fall back to OD charge without switching mode
             if (odReadyRef.current && !overdriveFiredThisPass) {
               overdriveFiredThisPass = true;
               activateOverdrive();
-              return false;
+              b.alive = false; continue;
             }
             overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
             odGainedThisPass += ENERGY_WALL_BULLET_GAIN;
@@ -3041,13 +3082,13 @@ export default function App() {
             integrityRef.current = healed;
             createExplosion(b.x, b.y, '#00ffcc', 2);
           }
-          return false;
+          b.alive = false; continue;
         }
         // OD_CHARGE (default)
         if (odReadyRef.current && !overdriveFiredThisPass) {
           overdriveFiredThisPass = true;
           activateOverdrive();
-          return false;
+          b.alive = false; continue;
         }
         overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + ENERGY_WALL_BULLET_GAIN);
         odGainedThisPass += ENERGY_WALL_BULLET_GAIN;
@@ -3055,8 +3096,8 @@ export default function App() {
           flash.current = Math.max(flash.current, 0.25);
         }
         createExplosion(b.x, b.y, '#ffcc00', 2);
-        return false;
-      });
+        b.alive = false; continue;
+      }
       // Flush batched state updates — one React render instead of one per bullet.
       if (odGainedThisPass > 0) setOverdrive(overdriveGauge.current);
       if (hpGainedThisPass > 0) setIntegrity(integrityRef.current);
@@ -3068,6 +3109,7 @@ export default function App() {
     if (isSlingshotAttacking) {
       const wakeRadius = 72;
       enemyBullets.current.forEach(b => {
+        if (!b.alive) return;
         const wdx = b.x - playerCenterX;
         const wdy = b.y - playerCenterY;
         const wDist = Math.sqrt(wdx * wdx + wdy * wdy);
@@ -3230,17 +3272,18 @@ export default function App() {
 
       // Collision with bullets
       bullets.current.forEach(bullet => {
+        if (!bullet.alive) return;
         if (block.hp > 0 &&
             bullet.x > block.x && bullet.x < block.x + block.width &&
             bullet.y > block.y && bullet.y < block.y + block.height) {
           if (block.type !== 'WALL' && block.type !== 'WINDMILL') {
             block.hp -= (bullet.damage || 1);
-            bullet.y = -100;
+            bullet.alive = false;
             if (block.hp <= 0) {
               triggerChainExplosion(block);
             }
           } else if (block.type !== 'WINDMILL') {
-            bullet.y = -100; // Indestructible block (WALL)
+            bullet.alive = false; // Indestructible block (WALL)
           }
           // WINDMILL body is transparent to bullets; blade arc check below.
         }
@@ -3265,8 +3308,8 @@ export default function App() {
             }
             return false;
           };
-          bullets.current.forEach(b => { if (b.y > -50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
-          enemyBullets.current.forEach(b => { if (b.y > -50 && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.y = -100; });
+          bullets.current.forEach(b => { if (b.alive && hitsWindmillBlade(b.x, b.y)) b.alive = false; });
+          enemyBullets.current.forEach(b => { if (b.alive && b.y < CANVAS_HEIGHT + 50 && hitsWindmillBlade(b.x, b.y)) b.alive = false; });
         }
       }
     });
@@ -3308,7 +3351,7 @@ export default function App() {
         // Spawn bullet at barrel tip (matches render: tr + 14px from center)
         const tr = Math.min(block.width, block.height) * 0.26;
         const barrelTip = tr + 14;
-        enemyBullets.current.push({
+        spawnBullet(enemyBullets.current, {
           x: cx + (dx / dist) * barrelTip,
           y: cy + (dy / dist) * barrelTip,
           vx: (dx / dist) * speed,
@@ -3351,7 +3394,7 @@ export default function App() {
         const speed = 3.8;
         const hexR = Math.min(block.width, block.height) * 0.28;
         const aimAngle = Math.atan2(dy, dx);
-        enemyBullets.current.push({
+        spawnBullet(enemyBullets.current, {
           x: cx + Math.cos(aimAngle) * (hexR + 14),
           y: cy + Math.sin(aimAngle) * (hexR + 14),
           vx: (dx / dist) * speed,
@@ -3369,6 +3412,7 @@ export default function App() {
     // Beams also damage alive enemies on contact.
     for (let bi = enemyBullets.current.length - 1; bi >= 0; bi--) {
       const b = enemyBullets.current[bi];
+      if (!b.alive) continue;
       if (!b.deflected || !b.isBeam) continue;
       const MAX_BEAM_BOUNCES = 7;
 
@@ -3442,7 +3486,7 @@ export default function App() {
           break;
         }
       }
-      if (removeBeam) { enemyBullets.current.splice(bi, 1); continue; }
+      if (removeBeam) { b.alive = false; continue; }
 
       // vs alive enemies
       for (let ei = 0; ei < enemies.current.length; ei++) {
@@ -3466,13 +3510,11 @@ export default function App() {
             audio.playExplosion(e.x + e.width / 2);
             setScore(s => s + 150);
           }
-          enemyBullets.current.splice(bi, 1);
+          b.alive = false;
           break;
         }
       }
     }
-
-    // BEAM_TURRET mobile: horizontal slide on rail between wall bounds, pause to aim before firing
     {
       const now = Date.now();
       blocks.current.forEach(turret => {
@@ -3584,7 +3626,7 @@ export default function App() {
 
       // Collision with bullets — early-out if bullet is far from asteroid bounds
       bullets.current.forEach(b => {
-        if (b.y < -10) return; // already removed bullet
+        if (!b.alive) return;
         const bdx = b.x - a.x;
         const bdy = b.y - a.y;
         if (Math.abs(bdx) > a.size || Math.abs(bdy) > a.size) return; // cheap AABB pre-check
@@ -3597,7 +3639,7 @@ export default function App() {
           a.vx += (b.vx || 0) * 0.1 * pushForce;
           a.vy += (b.vy || -10) * 0.1 * pushForce;
 
-          b.y = -100; // Remove bullet
+          b.alive = false; // Remove bullet
 
           // Hit feedback: small flash particles
           if (Math.random() > 0.5) {
@@ -3619,7 +3661,7 @@ export default function App() {
             // Drop scrap from asteroids
             const scrapCount = Math.floor(a.size / 20);
             for (let i = 0; i < scrapCount; i++) {
-              scraps.current.push({
+              spawnScrap(scraps.current, {
                 x: a.x,
                 y: a.y,
                 vx: (Math.random() - 0.5) * 6,
@@ -3784,10 +3826,11 @@ export default function App() {
 
       // Collision with bullets
       bullets.current.forEach(b => {
+        if (!b.alive) return;
         if (b.x > obs.x && b.x < obs.x + obs.width &&
             b.y > obs.y && b.y < obs.y + obs.height) {
           obs.hp -= (b.damage || 1);
-          b.y = -100; // Remove bullet
+          b.alive = false; // Remove bullet
           if (obs.hp <= 0) {
             audio.playExplosion(obs.x + obs.width / 2);
             createExplosion(obs.x + obs.width / 2, obs.y + obs.height / 2, obs.color, 20);
@@ -3843,7 +3886,7 @@ export default function App() {
           // Super Overdrive Shot — mobile fires 3-spread to save bullet/collision cost
           const spreadRange = isMobile ? 1 : 2; // mobile: -1..1 (3 bullets), desktop: -2..2 (5)
           for (let i = -spreadRange; i <= spreadRange; i++) {
-            bullets.current.push({
+            spawnBullet(bullets.current, {
               x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2 + i * 15,
               y: playerPos.current.y,
               vx: i * 0.5,
@@ -3853,11 +3896,11 @@ export default function App() {
             });
           }
         } else if (isMulti) {
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
-          bullets.current.push({ x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10, damage: bulletDamage, size: bulletSize });
+          spawnBullet(bullets.current, { x: playerPos.current.x + PLAYER_WIDTH / 2 - 10, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
+          spawnBullet(bullets.current, { x: playerPos.current.x + PLAYER_WIDTH / 2 + 6, y: playerPos.current.y, damage: bulletDamage, size: bulletSize });
+          spawnBullet(bullets.current, { x: playerPos.current.x + PLAYER_WIDTH / 2 - 2, y: playerPos.current.y - 10, damage: bulletDamage, size: bulletSize });
         } else {
-          bullets.current.push({
+          spawnBullet(bullets.current, {
             x: playerPos.current.x + PLAYER_WIDTH / 2 - bulletSize / 2,
             y: playerPos.current.y,
             damage: bulletDamage,
@@ -3871,21 +3914,23 @@ export default function App() {
 
     // Update bullets
     const bulletList = bullets.current;
-    for (let i = bulletList.length - 1; i >= 0; i--) {
+    for (let i = 0; i < bulletList.length; i++) {
       const b = bulletList[i];
+      if (!b.alive) continue;
       b.x += (b.vx || 0) * timeScale.current * dt;
       b.y += (b.vy || -BULLET_SPEED) * timeScale.current * dt;
 
       if (b.y < -20 || b.y > CANVAS_HEIGHT + 20) {
-        bulletList.splice(i, 1);
+        b.alive = false;
       }
     }
 
     // Update enemy bullets
     const currentEnemyBulletSpeed = (ENEMY_BULLET_SPEED + waveRef.current * 0.2) * worldSpeedScale;
     const enemyBulletList = enemyBullets.current;
-    for (let i = enemyBulletList.length - 1; i >= 0; i--) {
+    for (let i = 0; i < enemyBulletList.length; i++) {
       const b = enemyBulletList[i];
+      if (!b.alive) continue;
       let vx = b.vx || 0;
       let vy = b.vy || currentEnemyBulletSpeed;
 
@@ -3918,9 +3963,9 @@ export default function App() {
         else if (b.x > CANVAS_WIDTH) { b.x = CANVAS_WIDTH; b.vx = -Math.abs(b.vx ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
         if (b.y < 0) { b.y = 0; b.vy = Math.abs(b.vy ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
         else if (b.y > CANVAS_HEIGHT) { b.y = CANVAS_HEIGHT; b.vy = -Math.abs(b.vy ?? 0); b.bounces = (b.bounces ?? 0) + 1; }
-        if ((b.bounces ?? 0) >= MAX_BEAM_BOUNCES) { enemyBulletList.splice(i, 1); continue; }
+        if ((b.bounces ?? 0) >= MAX_BEAM_BOUNCES) { b.alive = false; continue; }
       } else if (b.y > CANVAS_HEIGHT + 20 || b.y < -30 || b.x < -20 || b.x > CANVAS_WIDTH + 20) {
-        enemyBulletList.splice(i, 1);
+        b.alive = false;
       }
     }
 
@@ -3950,7 +3995,7 @@ export default function App() {
             for (let i = 0; i < 2; i++) {
               setTimeout(() => {
                 if (!shooter.alive) return;
-                enemyBullets.current.push({
+                spawnBullet(enemyBullets.current, {
                   x: shooter.x + shooter.width / 2 - 2,
                   y: shooter.y + shooter.height,
                   vx: (dx / distance) * currentEnemyBulletSpeed * 1.2,
@@ -3983,7 +4028,7 @@ export default function App() {
             for (let i = 0; i < 3; i++) {
               setTimeout(() => {
                 if (!shooter.alive) return;
-                enemyBullets.current.push({
+                spawnBullet(enemyBullets.current, {
                   x: shooter.x + shooter.width / 2 - 2,
                   y: shooter.y + shooter.height,
                   vx: (dx / distance) * currentEnemyBulletSpeed * 1.5,
@@ -3997,7 +4042,7 @@ export default function App() {
         };
 
         const newBullets = shootPattern(shooter.type);
-        newBullets.forEach(b => enemyBullets.current.push(b));
+        newBullets.forEach(b => spawnBullet(enemyBullets.current, b));
         if (newBullets.length > 0) audio.playEnemyShoot(shooter.x + shooter.width / 2);
       }
     }
@@ -4199,7 +4244,7 @@ export default function App() {
                 const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - tip.x;
                 const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - tip.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                enemyBullets.current.push({
+                spawnBullet(enemyBullets.current, {
                   x: tip.x, y: tip.y,
                   vx: (dx / dist) * 3.5, vy: (dy / dist) * 3.5
                 });
@@ -4261,7 +4306,7 @@ export default function App() {
               : (enemy.phase === 3 ? 7 : 5);
             for (let i = 0; i < count; i++) {
               const angle = (Math.PI / count) * i + Math.PI / 4;
-              enemyBullets.current.push({
+              spawnBullet(enemyBullets.current, {
                 x: enemy.x + enemy.width / 2,
                 y: enemy.y + enemy.height,
                 vx: Math.cos(angle) * 4,
@@ -4281,7 +4326,7 @@ export default function App() {
           const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - (enemy.x + enemy.width / 2);
           const dy = playerPos.current.y - (enemy.y + enemy.height / 2);
           const dist = Math.sqrt(dx * dx + dy * dy);
-          enemyBullets.current.push({
+          spawnBullet(enemyBullets.current, {
             x: enemy.x + enemy.width / 2,
             y: enemy.y + enemy.height / 2,
             vx: (dx / dist) * 3,
@@ -4616,8 +4661,9 @@ export default function App() {
     }
     const playerBullets = bullets.current;
 
-    for (let i = playerBullets.length - 1; i >= 0; i--) {
+    for (let i = 0; i < playerBullets.length; i++) {
       const bullet = playerBullets[i];
+      if (!bullet.alive) continue;
 
       for (let j = 0; j < enemies.current.length; j++) {
         const enemy = enemies.current[j];
@@ -4682,7 +4728,7 @@ export default function App() {
               setBossHealth({ current: enemy.health!, max: enemy.maxHealth! });
               lastBossHealthUpdateAt.current = bossNow;
             }
-            playerBullets.splice(i, 1);
+            bullet.alive = false;
             audio.playEnemyHit(enemy.x + enemy.width / 2);
             flash.current = 0.2;
 
@@ -4715,7 +4761,7 @@ export default function App() {
 
               // Drop many scraps
               for (let i = 0; i < 20; i++) {
-                scraps.current.push({
+                spawnScrap(scraps.current, {
                   x: enemy.x + enemy.width / 2,
                   y: enemy.y + enemy.height / 2,
                   vx: (Math.random() - 0.5) * 10,
@@ -4753,14 +4799,14 @@ export default function App() {
           if (hasChrono && !isOverdriveActiveRef.current && Math.random() < 0.15) {
             timeScale.current = 0.3;
           }
-          playerBullets.splice(i, 1);
+          bullet.alive = false;
 
           // Drop scrap
           const scrapChance = isOverdriveActiveRef.current ? 1.0 : 0.6;
           const scrapCount = isOverdriveActiveRef.current ? 3 : 1;
           if (Math.random() < scrapChance) {
             for (let k = 0; k < scrapCount; k++) {
-              scraps.current.push({
+              spawnScrap(scraps.current, {
                 x: enemy.x + enemy.width / 2,
                 y: enemy.y + enemy.height / 2,
                 vx: (Math.random() - 0.5) * (isOverdriveActiveRef.current ? 8 : 4),
@@ -4937,8 +4983,9 @@ export default function App() {
     // Accumulators for guard-window bullet absorption — flush once after loop.
     let guardHpGain = 0;
     let guardOdGain = 0;
-    for (let i = eBullets.length - 1; i >= 0; i--) {
+    for (let i = 0; i < eBullets.length; i++) {
       const bullet = eBullets[i];
+      if (!bullet.alive) continue;
       const bulletCenterX = bullet.x + 2;
       const bulletCenterY = bullet.y + 6;
       // Graze Detection for bullets
@@ -4975,7 +5022,7 @@ export default function App() {
           emitSlingshotShieldImpact(bulletCenterX, bulletCenterY, 1.8);
         } else if (!bullet.deflected && bullet.x > px && bullet.x < px + pw && bullet.y > py && bullet.y < py + ph) {
           playerHit = true;
-          eBullets.splice(i, 1);
+          eBullets[i].alive = false;
         }
         continue;
       }
@@ -4990,14 +5037,14 @@ export default function App() {
             overdriveGauge.current = Math.min(MAX_OVERDRIVE, overdriveGauge.current + 2);
             guardOdGain += 2;
           }
-          eBullets.splice(i, 1);
+          eBullets[i].alive = false;
           continue;
       }
 
       if (bullet.x > px && bullet.x < px + pw &&
           bullet.y > py && bullet.y < py + ph) {
         playerHit = true;
-        eBullets.splice(i, 1);
+        eBullets[i].alive = false;
       }
     }
     // Flush guard-window absorption state — single React render regardless of how many bullets were caught.
@@ -5024,16 +5071,20 @@ export default function App() {
         return (dx * dx + dy * dy) <= AUTO_SPACE_HARD_ENEMY_RADIUS * AUTO_SPACE_HARD_ENEMY_RADIUS;
       });
 
-      const nearbyBulletIndices = eBullets
-        .map((bullet, index) => {
-          const bx = bullet.x + 2;
-          const by = bullet.y + 6;
-          const dx = bx - playerCX;
-          const dy = by - playerCY;
-          return { index, distSq: dx * dx + dy * dy };
-        })
-        .filter((item) => item.distSq <= AUTO_SPACE_BULLET_RADIUS * AUTO_SPACE_BULLET_RADIUS)
-        .sort((a, b) => a.distSq - b.distSq);
+      const nearbyBulletIndices: { index: number; distSq: number }[] = [];
+      for (let _bi = 0; _bi < eBullets.length; _bi++) {
+        const bullet = eBullets[_bi];
+        if (!bullet.alive) continue;
+        const bx = bullet.x + 2;
+        const by = bullet.y + 6;
+        const dx = bx - playerCX;
+        const dy = by - playerCY;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= AUTO_SPACE_BULLET_RADIUS * AUTO_SPACE_BULLET_RADIUS) {
+          nearbyBulletIndices.push({ index: _bi, distSq });
+        }
+      }
+      nearbyBulletIndices.sort((a, b) => a.distSq - b.distSq);
 
       if (hardEnemies.length >= AUTO_SPACE_MIN_HARD_ENEMIES && nearbyBulletIndices.length >= AUTO_SPACE_MIN_BULLETS) {
         hardEnemies
@@ -5054,13 +5105,11 @@ export default function App() {
             }
           });
 
-        const removeIndices = nearbyBulletIndices
+        nearbyBulletIndices
           .slice(0, AUTO_SPACE_BULLET_CLEAR_MAX)
-          .map((item) => item.index)
-          .sort((a, b) => b - a);
-        removeIndices.forEach((index) => {
-          if (index >= 0 && index < eBullets.length) eBullets.splice(index, 1);
-        });
+          .forEach(({ index }) => {
+            if (index >= 0 && index < eBullets.length) eBullets[index].alive = false;
+          });
 
         invulnerableUntil.current = Math.max(invulnerableUntil.current, frameNow + 260);
         flash.current = Math.max(flash.current, 0.18);
@@ -5147,7 +5196,7 @@ export default function App() {
         integrityRef.current -= damage;
         setIntegrity(integrityRef.current);
         invulnerableUntil.current = Date.now() + 2000;
-        enemyBullets.current = []; // Clear bullets to give a chance to recover
+        for (const b of enemyBullets.current) b.alive = false; // Clear bullets to give a chance to recover
         if (comboRef.current > 5) audio.playComboBreak();
         comboRef.current = 0;
         setCombo(0);
@@ -5348,12 +5397,13 @@ export default function App() {
 
         // Passive Defense: Collision with enemy bullets
         enemyBullets.current.forEach((eb, ebIdx) => {
+          if (!eb.alive) return;
           if (ebIdx % followerBulletStride !== 0) return;
           const bdx = eb.x - seg.x;
           const bdy = eb.y - seg.y;
           const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
           if (bdist < 15) {
-            eb.y = CANVAS_HEIGHT + 100; // Destroy bullet
+            eb.alive = false; // Destroy bullet
             createExplosion(seg.x, seg.y, '#00ffcc', 5);
             seg.lastHit = Date.now();
           }
@@ -5404,11 +5454,11 @@ export default function App() {
       flash.current = 0.6; // Warp start flash (reduced intensity)
 
       // Clear bullets and loose entities
-      bullets.current = [];
-      enemyBullets.current = [];
+      for (const b of bullets.current) b.alive = false;
+      for (const b of enemyBullets.current) b.alive = false;
       asteroids.current = [];
       obstacles.current = [];
-      scraps.current = [];
+      for (const s of scraps.current) s.alive = false;
 
       setTimeout(() => {
         flash.current = 1.0; // Final warp flash
@@ -5713,7 +5763,7 @@ export default function App() {
       ctx.beginPath();
       for (let si = 0; si < scraps.current.length; si++) {
         const s = scraps.current[si];
-        ctx.moveTo(s.x + 2, s.y);
+        if (!s.alive) continue;
         ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
       }
       ctx.fill();
@@ -6484,6 +6534,7 @@ export default function App() {
     // Bullets
     ctx.shadowBlur = 15 * shadowScale;
     bullets.current.forEach((b) => {
+      if (!b.alive) return;
       const size = b.size || 4;
       ctx.fillStyle = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
       ctx.shadowColor = isOverdriveActiveRef.current ? '#ff3366' : '#00ffcc';
@@ -6494,6 +6545,7 @@ export default function App() {
     // Enemy Bullets
     ctx.shadowBlur = 10 * shadowScale;
     enemyBullets.current.forEach((b) => {
+      if (!b.alive) return;
       if (b.isBeam) {
         // Beam: elongated bar aligned to velocity direction; white when deflected/bouncing
         const beamColor = b.deflected ? '#ffffff' : '#00ffdd';
