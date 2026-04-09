@@ -739,6 +739,8 @@ export default function App() {
     survivalTimerRef.current = 30;
     setSurvivalTime(getSurvivalDurationFromStage(stage));
     blocks.current = [];
+    scraps.current = [];
+    asteroids.current = [];
 
     setWaveTitle(true);
     audio.playStageStart();
@@ -3628,7 +3630,9 @@ export default function App() {
               const numFragments = isAsteroidBelt
                 ? (Math.random() < 0.6 ? 1 : 2) // Stage 2 fairness: fewer splits
                 : Math.floor(Math.random() * 2) + 2; // 2-3 fragments
+              const fragCap = isAsteroidBelt ? (isMobile ? 8 : 12) : (isMobile ? 12 : 20);
               for(let i=0; i<numFragments; i++) {
+                if (asteroids.current.length >= fragCap) break;
                 const fragSize = a.size * 0.5;
                 const angle = (i / numFragments) * Math.PI * 2 + Math.random() * 0.5;
                 const fragVertices = [];
