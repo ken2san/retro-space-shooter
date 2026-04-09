@@ -2083,8 +2083,9 @@ export default function App() {
       grazeCount.current++;
       setScore(s => s + 10);
 
-    // Slow motion effect
+    // Brief slow motion effect (resets after 150ms, matching other hit-stop patterns)
     timeScale.current = 0.8;
+    setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 150);
 
     // Spark particles
     for (let i = 0; i < 2; i++) {
