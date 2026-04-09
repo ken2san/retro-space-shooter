@@ -790,6 +790,7 @@ export default function App() {
       case 'WINGMAN':
         setHasWingman(true);
         wingmanRef.current = true;
+        wingmanPos.current = { x: playerPos.current.x + 50, y: playerPos.current.y + 10 };
         break;
       case 'DRONE':
         drones.current.push({ angle: Math.random() * Math.PI * 2, distance: 60, lastShot: 0 });
