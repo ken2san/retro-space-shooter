@@ -116,6 +116,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.1);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playEnemyShoot(x: number = 300) {
@@ -141,6 +142,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.2);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playDive(x: number = 300) {
@@ -166,6 +168,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 1.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); panner?.disconnect(); };
   }
 
   playEnemyHit(x: number = 300) {
@@ -254,6 +257,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.3);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playOverdrive() {
@@ -273,6 +277,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playSlingshot() {
@@ -293,6 +298,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.15);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playPowerDown() {
@@ -312,6 +318,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playShieldHit() {
@@ -331,6 +338,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.1);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playWarp() {
@@ -413,6 +421,7 @@ class RetroAudio {
       gain.connect(this.masterGain!);
       osc.start(this.ctx!.currentTime + i * 0.1);
       osc.stop(this.ctx!.currentTime + i * 0.1 + 0.3);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     });
   }
 
@@ -433,6 +442,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 1.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playExplosion(x: number = 300) {
@@ -477,6 +487,7 @@ class RetroAudio {
     boomGain.connect(this.masterGain);
     boom.start();
     boom.stop(this.ctx.currentTime + 0.5);
+    boom.onended = () => { boom.disconnect(); boomGain.disconnect(); };
   }
 
   playComboBreak() {
@@ -496,6 +507,7 @@ class RetroAudio {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.4);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playGraze() {
@@ -511,6 +523,7 @@ class RetroAudio {
     gain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.05);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playBossWarning() {
@@ -534,6 +547,7 @@ class RetroAudio {
     gain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + duration);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playStageStart() {
@@ -551,6 +565,7 @@ class RetroAudio {
       gain.connect(this.masterGain!);
       osc.start(this.ctx!.currentTime + i * 0.1);
       osc.stop(this.ctx!.currentTime + i * 0.1 + 0.2);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     });
   }
 
@@ -578,6 +593,7 @@ class RetroAudio {
     osc.start();
     lfo.stop(this.ctx.currentTime + 1.0);
     osc.stop(this.ctx.currentTime + 1.0);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); lfo.disconnect(); lfoGain.disconnect(); };
   }
 
   playTractorBeam() {
@@ -605,6 +621,7 @@ class RetroAudio {
     osc.start();
     lfo.stop(this.ctx.currentTime + 0.5);
     osc.stop(this.ctx.currentTime + 0.5);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); lfo.disconnect(); lfoGain.disconnect(); };
   }
 
   playBGM(stage: number = 1) {
@@ -654,6 +671,7 @@ class RetroAudio {
         kickGain.connect(globalFilter);
         kickOsc.start();
         kickOsc.stop(this.ctx.currentTime + 0.1);
+        kickOsc.onended = () => { kickOsc.disconnect(); kickGain.disconnect(); };
 
         // Sub-bass thump
         const subOsc = this.ctx.createOscillator();
@@ -667,6 +685,7 @@ class RetroAudio {
         subGain.connect(this.masterGain);
         subOsc.start();
         subOsc.stop(this.ctx.currentTime + 0.2);
+        subOsc.onended = () => { subOsc.disconnect(); subGain.disconnect(); };
       }
 
       // Snare/Hi-hat on off-beats
@@ -754,6 +773,7 @@ class RetroAudio {
         padGain.connect(this.masterGain);
         padOsc.start();
         padOsc.stop(this.ctx.currentTime + 4.0);
+        padOsc.onended = () => { padOsc.disconnect(); padGain.disconnect(); };
       }
 
       this.bgmStep++;
@@ -779,6 +799,7 @@ class RetroAudio {
     gain.connect(this.masterGain);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.05);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };
   }
 
   playUpgrade() {
@@ -796,6 +817,7 @@ class RetroAudio {
       gain.connect(this.masterGain!);
       osc.start(this.ctx!.currentTime + i * 0.1);
       osc.stop(this.ctx!.currentTime + i * 0.1 + 0.4);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
     });
   }
 

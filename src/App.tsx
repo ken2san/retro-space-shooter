@@ -2168,8 +2168,8 @@ export default function App() {
     }
 
     // Decay effects - Move BEFORE early return so they don't get stuck
-    if (glitch.current > 0) glitch.current *= Math.pow(0.9, dt);
-    if (shake.current > 0) shake.current *= Math.pow(0.85, dt);
+    if (glitch.current > 0) glitch.current *= (1 - 0.1 * dt);
+    if (shake.current > 0) shake.current *= (1 - 0.15 * dt);
     if (shake.current < 0.5) shake.current = 0;
     if (flash.current > 0) flash.current -= 0.04 * dt;
     if (flash.current < 0) flash.current = 0;
@@ -2681,8 +2681,7 @@ export default function App() {
 
       s.x += s.vx * dt;
       s.y += s.vy * dt;
-      s.vx *= Math.pow(0.95, dt);
-      s.vy *= Math.pow(0.95, dt);
+      const sFric = 1 - 0.05 * dt; s.vx *= sFric; s.vy *= sFric;
       s.y += 1 * dt; // Drift down
 
       if (dist < 30) {
@@ -4005,8 +4004,9 @@ export default function App() {
       if (enemy.stunnedUntil && enemy.stunnedUntil > currentTime) {
         enemy.x += (enemy.knockbackVX || 0) * dt;
         enemy.y += (enemy.knockbackVY || 0) * dt;
-        enemy.knockbackVX = (enemy.knockbackVX || 0) * Math.pow(0.9, dt);
-        enemy.knockbackVY = (enemy.knockbackVY || 0) * Math.pow(0.9, dt);
+        const kbFric = 1 - 0.1 * dt;
+        enemy.knockbackVX = (enemy.knockbackVX || 0) * kbFric;
+        enemy.knockbackVY = (enemy.knockbackVY || 0) * kbFric;
         return;
       }
 
@@ -5176,8 +5176,7 @@ export default function App() {
       } else {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
-        p.vx *= Math.pow(0.95, dt); // friction
-        p.vy *= Math.pow(0.95, dt);
+        const pFric = 1 - 0.05 * dt; p.vx *= pFric; p.vy *= pFric; // friction
       }
       if (p.rotation !== undefined && p.vr !== undefined) {
         p.rotation += p.vr * dt;
