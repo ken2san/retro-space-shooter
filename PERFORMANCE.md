@@ -1,6 +1,6 @@
 # NEON DEFENDER — Performance Notes
 
-_Last updated: 2026-04-09 (session 2)_
+_Last updated: 2026-04-09 (session 3)_
 
 > **Usage**: Update "Current State" at the end of each session so the next session
 > can start here instead of reading conversation history.
@@ -10,7 +10,7 @@ _Last updated: 2026-04-09 (session 2)_
 ## Current State
 
 **Branch**: `perf/speed-polish-2`
-**Last commit**: `094afb1` — perf: mobile boss rendering — 3 gaps fixed
+**Last commit**: `78e7dc7` — perf: object pooling for bullets, enemyBullets, scraps
 **Build**: passing (TSC clean, Vite build OK)
 **Firebase**: deployed and live
 
@@ -23,12 +23,13 @@ _Last updated: 2026-04-09 (session 2)_
 - Wingman top-left spawn ✅
 - Tutorial Stage blur / motion accumulation: improved (shadowScale 0.7→0.5 at tier 0 on mobile) ✅
 - Boss fight heavy: partially improved (3 render gaps closed); still the heaviest point
+- Object pooling: zero heap alloc per bullet/scrap spawn ✅
 
 **Open issues / known bugs**:
 
 - Boss fight still noticeably heavy on mobile — further investigation needed
 
-**Next task**: Object pooling for bullets and scraps (see "Next Optimization Candidates" below)
+**Next task**: TBD
 
 ---
 
@@ -112,6 +113,21 @@ Root cause: three rendering paths did not correctly apply mobile tier reductions
 | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Clamp `nextTier` and `nextSimulationTier` to ≥1 on mobile when `waveHasBossRef` is set | p95 moving average took 2–3s to cross threshold; boss caused visible slowdown on entry |
 
+### Object pooling for bullets, enemyBullets, scraps
+
+Root cause: every player shot and enemy shot created a new JS object via `push({...})`;
+destroyed entities were removed via `splice()` or `.filter()`. On heavy waves (100+ enemy
+bullets alive), this produced constant heap allocation and GC pauses.
+
+| Fix                                                                              | Effect                                                              |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Pre-allocate fixed pools via `Array.from` in `useRef` (100/150/100 slots mobile) | Zero heap alloc at steady state                                     |
+| `spawnBullet(pool, data)` / `spawnScrap(pool, data)` module-level helpers         | Reclaim first dead slot via linear scan; `Object.assign` into it   |
+| All `push()` → `spawnBullet()`/`spawnScrap()` (17 call sites)                   | No new object creation per shot                                     |
+| All `splice()`/`filter()` destruction → `b.alive = false` (20+ sites)           | No array mutation; dead slots reused next spawn                     |
+| All update/collision/render loops: `if (!b.alive) continue/return`               | Dead slots skipped at zero allocation cost                          |
+| `enemyBulletCap` splice-truncation removed                                       | No longer needed — pool size is the hard cap                        |
+
 ### Scrap magnet sqrt elimination
 
 | Fix                                                                                                          | Location          |
@@ -142,6 +158,7 @@ Current state: boss phase logic, laser rotation, tractor beam drag, and tentacle
 run at full cost regardless of `simulationLoadTier`. Only particle/bullet caps are affected.
 
 Candidates for gating:
+
 - Tentacle segment physics: at sim tier ≥1, update every 2nd segment only (mirroring
   the render stride already applied to collision detection)
 - Laser beam angle: at sim tier 2, quantise to 8 steps instead of continuous sin/cos
@@ -149,28 +166,7 @@ Candidates for gating:
 
 Low refactor risk — all changes are inside the boss update block, isolated to mobile paths.
 
-### 1. Object pooling (high impact, no new deps)
-
-Today: bullets and scraps are `push()`-ed and destroyed by filtering or splicing,
-creating constant heap churn. Object pooling reuses dead slots.
-
-Pattern:
-
-```ts
-// Pre-allocate
-const bulletPool: Bullet[] = Array.from({ length: 200 }, () => ({ alive: false, ...defaults }));
-// Spawn: find first dead slot
-const b = bulletPool.find(b => !b.alive)!;
-Object.assign(b, { alive: true, x, y, ... });
-// Destroy: flip flag only — no splice, no alloc
-b.alive = false;
-// Iterate: for loop with alive guard (already done for enemies)
-```
-
-This is the structural fix that makes GC pressure go away permanently.
-Current enemy loop already uses this pattern — extend it to bullets and scraps.
-
-### 2. Layered canvas (medium impact, no new deps)
+### 1. Layered canvas (medium impact, no new deps)
 
 Background (stars, asteroids) moves slowly and doesn't change every frame.
 Split into two `<canvas>` elements:
@@ -180,7 +176,7 @@ Split into two `<canvas>` elements:
 
 Saves ~30–40% of `clearRect` + star/asteroid draw calls per frame on busy frames.
 
-### 3. OffscreenCanvas + Worker (high impact, requires refactor)
+### 2. OffscreenCanvas + Worker (high impact, requires refactor)
 
 Move the entire render pipeline to a Web Worker via `canvas.transferControlToOffscreen()`.
 Main thread handles only input and state; worker handles draw.
@@ -192,7 +188,7 @@ and `setInterval` are no longer competing with draw calls.
 be serialized/transferred across the boundary. Not worth it until pooling + layered
 canvas are done and profiling still shows a bottleneck.
 
-### 4. Pixi.js / WebGL renderer (high impact, high effort, new dep)
+### 3. Pixi.js / WebGL renderer (high impact, high effort, new dep)
 
 Replace Canvas 2D with WebGL via Pixi.js. Sprite batching and GPU-side compositing
 handle hundreds of objects with negligible CPU cost.
