@@ -2,6 +2,27 @@
 
 _Last updated: 2026-04-09_
 
+> **Usage**: Update "Current State" at the end of each session so the next session
+> can start here instead of reading conversation history.
+
+---
+
+## Current State
+
+**Branch**: `perf/speed-polish-2`
+**Last commit**: `cfc1223` — docs: update PERFORMANCE.md and Roadmap.md
+**Build**: passing (TSC clean, Vite build OK)
+**Firebase**: deployed and live
+
+**Verified fixed** (tested on device):
+- Stage 2 entry slowdown ✅
+- Stage 2-2 entry jolt ✅
+- BGM gradual slowdown during Stage 2-2 survival wave — **deployed but not yet confirmed on device**
+
+**Open issues / known bugs**: none currently tracked
+
+**Next task**: Object pooling for bullets and scraps (see "Next Optimization Candidates" below)
+
 ---
 
 ## Completed (branch: `perf/speed-polish-2`)
