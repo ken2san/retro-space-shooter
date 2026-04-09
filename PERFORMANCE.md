@@ -1,6 +1,6 @@
 # NEON DEFENDER — Performance Notes
 
-_Last updated: 2026-04-09 (session 3)_
+_Last updated: 2026-04-09 (session 4)_
 
 > **Usage**: Update "Current State" at the end of each session so the next session
 > can start here instead of reading conversation history.
@@ -10,7 +10,7 @@ _Last updated: 2026-04-09 (session 3)_
 ## Current State
 
 **Branch**: `perf/speed-polish-2`
-**Last commit**: `78e7dc7` — perf: object pooling for bullets, enemyBullets, scraps
+**Last commit**: `da4d092` — fix: add no-store header for index.html
 **Build**: passing (TSC clean, Vite build OK)
 **Firebase**: deployed and live
 
@@ -21,15 +21,19 @@ _Last updated: 2026-04-09 (session 3)_
 - BGM gradual slowdown ✅
 - Graze slow-motion stuck at 0.8× permanently ✅
 - Wingman top-left spawn ✅
-- Tutorial Stage blur / motion accumulation: improved (shadowScale 0.7→0.5 at tier 0 on mobile) ✅
+- Tutorial Stage blur / motion accumulation: improved ✅
 - Boss fight heavy: partially improved (3 render gaps closed); still the heaviest point
 - Object pooling: zero heap alloc per bullet/scrap spawn ✅
+- Scrap rendering artifact (cyan polygon): fixed ✅
+- iOS Home Screen shortcut serving stale JS: fixed ✅
+
+**Overall**: significant performance improvement confirmed on device. Boss fight is slightly slow; all other stages acceptable.
 
 **Open issues / known bugs**:
 
-- Boss fight still noticeably heavy on mobile — further investigation needed
+- Boss fight still noticeably heavy on mobile — candidate fixes documented below (§0)
 
-**Next task**: TBD
+**Next task**: Boss simulation tier gating (§0)
 
 ---
 
@@ -119,14 +123,26 @@ Root cause: every player shot and enemy shot created a new JS object via `push({
 destroyed entities were removed via `splice()` or `.filter()`. On heavy waves (100+ enemy
 bullets alive), this produced constant heap allocation and GC pauses.
 
-| Fix                                                                              | Effect                                                              |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Pre-allocate fixed pools via `Array.from` in `useRef` (100/150/100 slots mobile) | Zero heap alloc at steady state                                     |
-| `spawnBullet(pool, data)` / `spawnScrap(pool, data)` module-level helpers         | Reclaim first dead slot via linear scan; `Object.assign` into it   |
-| All `push()` → `spawnBullet()`/`spawnScrap()` (17 call sites)                   | No new object creation per shot                                     |
-| All `splice()`/`filter()` destruction → `b.alive = false` (20+ sites)           | No array mutation; dead slots reused next spawn                     |
-| All update/collision/render loops: `if (!b.alive) continue/return`               | Dead slots skipped at zero allocation cost                          |
-| `enemyBulletCap` splice-truncation removed                                       | No longer needed — pool size is the hard cap                        |
+| Fix                                                                              | Effect                                                           |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Pre-allocate fixed pools via `Array.from` in `useRef` (100/150/100 slots mobile) | Zero heap alloc at steady state                                  |
+| `spawnBullet(pool, data)` / `spawnScrap(pool, data)` module-level helpers        | Reclaim first dead slot via linear scan; `Object.assign` into it |
+| All `push()` → `spawnBullet()`/`spawnScrap()` (17 call sites)                    | No new object creation per shot                                  |
+| All `splice()`/`filter()` destruction → `b.alive = false` (20+ sites)            | No array mutation; dead slots reused next spawn                  |
+| All update/collision/render loops: `if (!b.alive) continue/return`               | Dead slots skipped at zero allocation cost                       |
+| `enemyBulletCap` splice-truncation removed                                       | No longer needed — pool size is the hard cap                     |
+
+### Scrap render artifact (cyan polygon)
+
+| Fix                                                                               | Cause                                                                                                   |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Restore `ctx.moveTo(s.x + 2, s.y)` before each `ctx.arc()` in scrap batch render | Missing `moveTo` caused Canvas 2D to implicitly draw `lineTo` between arcs, connecting all dots into one filled polygon |
+
+### iOS Home Screen shortcut serving stale JS
+
+| Fix                                                                   | Cause                                                                                         |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Add `Cache-Control: no-store` for `/index.html` in `firebase.json`    | iOS caches PWA/shortcut `index.html` indefinitely; Vite hash-busts JS but not the HTML entry point |
 
 ### Scrap magnet sqrt elimination
 
