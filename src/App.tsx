@@ -7305,6 +7305,9 @@ export default function App() {
       }
       // Mobile boss floor: never drop below tier 1 while a boss is alive.
       if (isBossActiveForTier && nextTier < 1) nextTier = 1;
+      // Mobile formation floor: ≥10 alive enemies means 10+ per-enemy shadowBlur draws per frame —
+      // as GPU-expensive as a boss. Pre-raise to tier 1 proactively.
+      if (isMobile && aliveEnemies >= 10 && nextTier < 1) nextTier = 1;
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
@@ -7316,8 +7319,9 @@ export default function App() {
       } else if (p95Frame > (isMobile ? 42 : 50)) nextSimulationTier = 2;
       else if (p95Frame > (isMobile ? 33 : 38)) nextSimulationTier = 1;
       else if (p95Frame < (isMobile ? 26 : 28)) nextSimulationTier = 0;
-      // Mobile boss floor for simulation tier as well.
+      // Mobile boss + formation floor for simulation tier as well.
       if (isBossActiveForTier && nextSimulationTier < 1) nextSimulationTier = 1;
+      if (isMobile && aliveEnemies >= 10 && nextSimulationTier < 1) nextSimulationTier = 1;
       simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
