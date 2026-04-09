@@ -2678,11 +2678,12 @@ export default function App() {
       const s = sList[i];
       const dx = (playerPos.current.x + PLAYER_WIDTH / 2) - s.x;
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - s.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const distSq = dx * dx + dy * dy;
 
       const magnetRange = 150 + (magnetRef.current - 1) * 60;
-      if (dist < magnetRange) {
-        // Magnet effect
+      if (distSq < magnetRange * magnetRange) {
+        // Magnet effect — only compute sqrt when inside range
+        const dist = Math.sqrt(distSq);
         const pullStrength = (0.5 + (magnetRef.current - 1) * 0.2) * dt;
         s.vx += (dx / dist) * pullStrength;
         s.vy += (dy / dist) * pullStrength;
@@ -2693,7 +2694,7 @@ export default function App() {
       const sFric = 1 - 0.05 * dt; s.vx *= sFric; s.vy *= sFric;
       s.y += 1 * dt; // Drift down
 
-      if (dist < 30) {
+      if (distSq < 30 * 30) {
         handleScrapCollection(s);
         s.life = 0;
       }
@@ -7281,6 +7282,10 @@ export default function App() {
       let nextTier = prevTier;
       const isChaseStage = currentStage === 4;
       const isFinalLaserBossActive = enemies.current.some((enemy) => enemy.alive && enemy.isBoss && enemy.bossType === BossType.LASER);
+      // On mobile: pre-emptively raise to tier 1 the moment any boss is alive,
+      // without waiting for frame-time degradation. Boss shadowBlur and tentacle
+      // rendering are expensive enough that reactive tier changes arrive too late.
+      const isBossActiveForTier = isMobile && waveHasBossRef.current;
 
       // Final Front sector 2 boss gets the earliest downgrade because its beam pass is expensive.
       if (isFinalLaserBossActive) {
@@ -7297,6 +7302,8 @@ export default function App() {
         else if (p95Frame > (isMobile ? 28 : 36)) nextTier = 1;
         else if (p95Frame < (isMobile ? 22 : 28)) nextTier = 0;
       }
+      // Mobile boss floor: never drop below tier 1 while a boss is alive.
+      if (isBossActiveForTier && nextTier < 1) nextTier = 1;
       renderLoadTierRef.current = nextTier;
 
       let nextSimulationTier = simulationLoadTierRef.current;
@@ -7308,6 +7315,8 @@ export default function App() {
       } else if (p95Frame > (isMobile ? 42 : 50)) nextSimulationTier = 2;
       else if (p95Frame > (isMobile ? 33 : 38)) nextSimulationTier = 1;
       else if (p95Frame < (isMobile ? 26 : 28)) nextSimulationTier = 0;
+      // Mobile boss floor for simulation tier as well.
+      if (isBossActiveForTier && nextSimulationTier < 1) nextSimulationTier = 1;
       simulationLoadTierRef.current = nextSimulationTier;
 
       setPerfStats({
