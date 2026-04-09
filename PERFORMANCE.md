@@ -1,6 +1,6 @@
 # NEON DEFENDER — Performance Notes
 
-_Last updated: 2026-04-09_
+_Last updated: 2026-04-09 (session 2)_
 
 > **Usage**: Update "Current State" at the end of each session so the next session
 > can start here instead of reading conversation history.
@@ -10,16 +10,22 @@ _Last updated: 2026-04-09_
 ## Current State
 
 **Branch**: `perf/speed-polish-2`
-**Last commit**: `cfc1223` — docs: update PERFORMANCE.md and Roadmap.md
+**Last commit**: `094afb1` — perf: mobile boss rendering — 3 gaps fixed
 **Build**: passing (TSC clean, Vite build OK)
 **Firebase**: deployed and live
 
 **Verified fixed** (tested on device):
+
 - Stage 2 entry slowdown ✅
 - Stage 2-2 entry jolt ✅
-- BGM gradual slowdown during Stage 2-2 survival wave — **deployed but not yet confirmed on device**
+- BGM gradual slowdown ✅
+- Graze slow-motion stuck at 0.8× permanently ✅
+- Wingman top-left spawn ✅
+- Tutorial Stage blur / motion accumulation: improved (shadowScale 0.7→0.5 at tier 0 on mobile) ✅
+- Boss fight heavy: partially improved (3 render gaps closed); still the heaviest point
 
-**Open issues / known bugs**: none currently tracked
+**Open issues / known bugs**:
+- Boss fight still noticeably heavy on mobile — further investigation needed
 
 **Next task**: Object pooling for bullets and scraps (see "Next Optimization Candidates" below)
 
@@ -66,6 +72,51 @@ GC pauses delay `setInterval(125ms)`, causing BGM to gradually slow down mid-wav
 | Fix                                                          | Cause                                                 |
 | ------------------------------------------------------------ | ----------------------------------------------------- |
 | `wingmanPos.current` set to player position on upgrade grant | Default `{x:0,y:0}` caused top-left spawn + slow lerp |
+
+### Mobile shadow reduction (tier 0 unification)
+
+Root cause: at render tier 0, `shadowScale = 0.7` on mobile → 18 enemies × `shadowBlur 10.5px`
+cost more than a boss at tier 1 (`shadowBlur 7.5px`). Tutorial stage was heavier than
+Chase-1 despite having no survival mechanics.
+
+| Fix | Effect |
+| --- | --- |
+| `shadowScale` tier 0 on mobile: 0.7 → 0.5 (same as tier 1) | `shadowBlur 10.5` → `7.5` per enemy at tier 0; ~28% GPU shadow reduction on Tutorial stage |
+
+### Graze slow-motion permanent bug
+
+| Fix | Cause |
+| --- | --- |
+| `handleGraze()`: add `setTimeout(150ms)` to restore `timeScale = 1.0` | `timeScale` set to 0.8 on graze with no reset; every other hit-stop had a reset; graze did not |
+
+### Mobile boss rendering — 3 render gaps
+
+Root cause: three rendering paths did not correctly apply mobile tier reductions during boss fights.
+
+| Fix | Gap |
+| --- | --- |
+| LASER phase-3 beam count: `isReducedBossFx` (tier 1) now also caps at 2 beams | Was only capped at tier 2; mobile always at tier ≥1 during boss → 4 full-screen strokes redundantly |
+| Tractor beam `shadowBlur`: `20` → `20 * shadowScale` | Hardcoded value ignored `shadowScale`; shadow fired at full cost even at tier 2 (shadowScale=0) |
+| Nebula frame divisor: mobile + boss + tier 1 → 3 (skip 2-of-3 frames) | Was 2 (skip 1-of-2); `createRadialGradient + screen composite` is expensive during heaviest scenario |
+
+### Mobile formation floor (tier ≥1 when ≥10 enemies alive)
+
+| Fix | Cause |
+| --- | --- |
+| Pre-raise render and simulation tier to 1 on mobile when ≥10 enemies alive | 18 formation enemies at tier 0 cost more GPU than a boss at tier 1 |
+
+### Mobile boss render/simulation floor (immediate tier ≥1)
+
+| Fix | Cause |
+| --- | --- |
+| Clamp `nextTier` and `nextSimulationTier` to ≥1 on mobile when `waveHasBossRef` is set | p95 moving average took 2–3s to cross threshold; boss caused visible slowdown on entry |
+
+### Scrap magnet sqrt elimination
+
+| Fix | Location |
+| --- | --- |
+| Range check: `Math.sqrt` → squared-distance comparison; `Math.sqrt` only for in-range scraps (normalisation) | Scrap magnet loop |
+| Collection check: `dist < 30` → `distSq < 900` | Same |
 
 ### Other (Phase 4, earlier)
 
