@@ -134,6 +134,21 @@ Root cause: three rendering paths did not correctly apply mobile tier reductions
 
 Ordered by impact-to-effort ratio for iOS mobile.
 
+### 0. Boss simulation tier gating (targeted, no new deps)
+
+**Directly addresses "boss still heavy" on mobile.**
+
+Current state: boss phase logic, laser rotation, tractor beam drag, and tentacle physics
+run at full cost regardless of `simulationLoadTier`. Only particle/bullet caps are affected.
+
+Candidates for gating:
+- Tentacle segment physics: at sim tier ≥1, update every 2nd segment only (mirroring
+  the render stride already applied to collision detection)
+- Laser beam angle: at sim tier 2, quantise to 8 steps instead of continuous sin/cos
+- Tractor drag: at sim tier ≥1, skip drag update on frames where no player contact (cheap guard)
+
+Low refactor risk — all changes are inside the boss update block, isolated to mobile paths.
+
 ### 1. Object pooling (high impact, no new deps)
 
 Today: bullets and scraps are `push()`-ed and destroyed by filtering or splicing,
