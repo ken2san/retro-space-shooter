@@ -5454,6 +5454,16 @@ export default function App() {
       } else {
         integrityRef.current = 0;
         setIntegrity(0);
+        hitsTakenRef.current++;
+        gameOverStatsRef.current = {
+          survivalMs: Date.now() - gameSessionStartRef.current,
+          shotsFired: shotsFiredRef.current,
+          shotsHit: shotsHitRef.current,
+          hitsTaken: hitsTakenRef.current,
+          maxCombo: maxComboRef.current,
+          grazes: grazeCount.current,
+          sectorsReached: waveRef.current,
+        };
         audio.stopBGM();
         setGameState('GAME_OVER');
       }
@@ -5727,6 +5737,15 @@ export default function App() {
     // (Moved to beginning of update loop)
 
     if (enemies.current.some(e => e.alive && e.y + e.height > CANVAS_HEIGHT && e.state === 'IN_FORMATION')) {
+      gameOverStatsRef.current = {
+        survivalMs: Date.now() - gameSessionStartRef.current,
+        shotsFired: shotsFiredRef.current,
+        shotsHit: shotsHitRef.current,
+        hitsTaken: hitsTakenRef.current,
+        maxCombo: maxComboRef.current,
+        grazes: grazeCount.current,
+        sectorsReached: waveRef.current,
+      };
       setGameState('GAME_OVER');
     }
   };
