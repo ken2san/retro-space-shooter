@@ -2221,6 +2221,9 @@ export default function App() {
     const dronesArr = drones.current;
     const trailsArr = trails.current;
     const damageNumbersArr = damageNumbers.current;
+    // Suppress hitstop entirely while a boss is alive — prevents laser beam stutter
+    // caused by bullets hitting non-boss enemies (e.g. SWARM) during the boss wave.
+    const bossAlive = enemiesArr.some(e => e.alive && e.isBoss);
 
     // Warp logic should run even if not in PLAYING state (e.g. STAGE_CLEAR)
     if (isWarping.current) {
@@ -4287,7 +4290,7 @@ export default function App() {
             }
           } else if (enemy.bossType === BossType.LASER) {
             // Final Front laser boss: slower rotation and tighter hit width for fairer reads.
-            const laserRotationSpeed = enemy.phase === 3 ? 0.72 : enemy.phase === 2 ? 0.58 : 0.46;
+            const laserRotationSpeed = enemy.phase === 3 ? 0.45 : enemy.phase === 2 ? 0.35 : 0.28;
             // Final Front laser boss: dt-scaled timer is already frame-rate independent;
             // rotation speed is not load-tier-gated so mobile and desktop feel the same.
             const loadAdjustedRotationSpeed = laserRotationSpeed;
@@ -4746,9 +4749,10 @@ export default function App() {
             });
           }
 
-          // Hit stop (milliseconds) — skip for bosses: rapid fire on boss = continuous
-          // hitstop stacking which freezes tractorBeamTimer and makes orbitals appear to stall
-          if (!enemy.isBoss) hitStopTimer.current = Date.now() + 33;
+          // Hit stop (milliseconds) — skip while any boss is alive: rapid fire on bosses or
+          // on SWARM enemies during a boss wave causes repeated 33ms freezes that visibly
+          // stutter the laser beam rotation.
+          if (!enemy.isBoss && !bossAlive) hitStopTimer.current = Date.now() + 33;
 
           // EMP Burst
           if (hasEMP && Math.random() < 0.1) {
