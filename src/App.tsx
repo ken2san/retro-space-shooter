@@ -4142,10 +4142,11 @@ export default function App() {
             enemy.moveDir = (enemy.moveDir || 1) * -1;
           }
 
-          // LASER boss: gentle sinusoidal vertical float so it hovers near center
-          // rather than camping the top edge. Range: originY ±35px (~9s period).
+          // LASER boss: sinusoidal float between originY and originY+50.
+          // Using (sin+1)*25 keeps y always >= originY so the entry-descent
+          // guard above never re-triggers and causes the "catching" stutter.
           if (enemy.bossType === BossType.LASER) {
-            enemy.y = enemy.originY + Math.sin(currentTime * 0.0007) * 35;
+            enemy.y = enemy.originY + (Math.sin(currentTime * 0.0007) + 1) * 25;
           }
 
           // Phase logic
