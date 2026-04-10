@@ -160,7 +160,7 @@ export default function App() {
   const canvasScaleRef = useRef(1); // rect.height / CANVAS_HEIGHT — updated in pointer event handlers
   const [gameState, setGameState] = useState<GameState>('LOADING');
   const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
+  const [highScore, setHighScore] = useState(() => parseInt(localStorage.getItem('neon:highScore') || '0', 10));
   const [victoryDisplayScore, setVictoryDisplayScore] = useState(0);
   const [wave, setWave] = useState(1);
   const [sectorName, setSectorName] = useState('Outer Rim');
@@ -7726,6 +7726,7 @@ export default function App() {
   useEffect(() => {
     if (score > highScore) {
       setHighScore(score);
+      localStorage.setItem('neon:highScore', String(score));
     }
   }, [score]);
 
@@ -7743,6 +7744,7 @@ export default function App() {
         xpToNextLevel={xpToNextLevel}
         sectorName={sectorName}
         score={score}
+        combo={combo}
         wingmanActive={wingmanRef.current}
         integrity={integrity}
         overdrive={overdrive}

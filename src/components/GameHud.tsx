@@ -9,6 +9,7 @@ type GameHudProps = {
   xpToNextLevel: number;
   sectorName: string;
   score: number;
+  combo: number;
   wingmanActive: boolean;
   integrity: number;
   overdrive: number;
@@ -26,6 +27,7 @@ const GameHud = memo(function GameHud({
   xpToNextLevel,
   sectorName,
   score,
+  combo,
   wingmanActive,
   integrity,
   overdrive,
@@ -70,6 +72,20 @@ const GameHud = memo(function GameHud({
               {score.toLocaleString().padStart(8, '0')}
             </span>
             <span className="text-[8px] text-gray-600 font-bold uppercase tracking-widest">PTS</span>
+            <AnimatePresence>
+              {combo >= 2 && (
+                <motion.span
+                  key={combo}
+                  initial={{ scale: 1.6, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="text-[10px] font-black uppercase tracking-widest"
+                  style={{ color: combo >= 5 ? '#ff3366' : '#ffcc00', textShadow: `0 0 8px ${combo >= 5 ? '#ff3366' : '#ffcc00'}` }}
+                >
+                  {combo}× COMBO
+                </motion.span>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
