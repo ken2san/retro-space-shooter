@@ -2713,6 +2713,8 @@ export default function App() {
 
     // Update Scraps
     const sList = scraps.current;
+    const magnetRangeSq = (() => { const r = 150 + (magnetRef.current - 1) * 60; return r * r; })();
+    const magnetPullStrength = (0.5 + (magnetRef.current - 1) * 0.2) * dt;
     for (let i = 0; i < sList.length; i++) {
       const s = sList[i];
       if (!s.alive) continue;
@@ -2720,13 +2722,12 @@ export default function App() {
       const dy = (playerPos.current.y + PLAYER_HEIGHT / 2) - s.y;
       const distSq = dx * dx + dy * dy;
 
-      const magnetRange = 150 + (magnetRef.current - 1) * 60;
-      if (distSq < magnetRange * magnetRange) {
+      // At critical sim tier, skip magnet pull — player can still collect by proximity
+      if (!isCriticalSim && distSq < magnetRangeSq) {
         // Magnet effect — only compute sqrt when inside range
         const dist = Math.sqrt(distSq);
-        const pullStrength = (0.5 + (magnetRef.current - 1) * 0.2) * dt;
-        s.vx += (dx / dist) * pullStrength;
-        s.vy += (dy / dist) * pullStrength;
+        s.vx += (dx / dist) * magnetPullStrength;
+        s.vy += (dy / dist) * magnetPullStrength;
       }
 
       s.x += s.vx * dt;
