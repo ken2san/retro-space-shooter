@@ -970,10 +970,12 @@ export default function App() {
     let tentacleChance = 0;
 
     if (currentStage === 2) {
-      // Asteroid Belt: tentacles only — walls/destructibles would conflict with asteroid system.
+      // Asteroid Belt: one tentacle on screen at a time (windmill-style guard).
+      // This gives a clear "surprise hazard" feel without cluttering the asteroid field.
       wallDensity = 0;
       destructibleDensity = 0;
-      tentacleChance = 0.015;
+      const hasTentacleOnScreen = blocks.current.some(b => b.type === 'TENTACLE' && b.y < CANVAS_HEIGHT);
+      tentacleChance = hasTentacleOnScreen ? 0 : 0.04;
     }
 
     if (currentStage === 3) {
