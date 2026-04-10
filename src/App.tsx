@@ -7501,30 +7501,21 @@ export default function App() {
         {/* CRT Vignette */}
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
-        {/* Dev: God Mode badge */}
-        {(import.meta.env.DEV || debugMode) && godMode && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 px-3 py-0.5 bg-yellow-400/20 border border-yellow-400/60 rounded-full pointer-events-none">
-            <span className="text-[9px] font-black text-yellow-300 uppercase tracking-widest">★ GOD MODE</span>
-          </div>
-        )}
-
-        {/* Debug panel — visible when ?debug=1; stage buttons mobile-only (PC uses Alt+1-5) */}
-        {debugMode && gameState === 'PLAYING' && (
-          <div className="absolute bottom-[4.5rem] right-2 z-30 flex flex-col gap-1 items-end select-none">
+        {/* Debug panel — mobile only; PC uses Alt+1-5 (stage) and G (god mode) */}
+        {debugMode && isMobile && gameState === 'PLAYING' && (
+          <div className="absolute bottom-[5rem] right-2 z-30 flex flex-col gap-1 items-end select-none">
             <span className="text-[7px] text-yellow-400/50 font-black uppercase tracking-widest">debug</span>
-            {isMobile && (
-              <div className="flex gap-1">
-                {([1, 2, 3, 4, 5] as const).map(s => (
-                  <button
-                    key={s}
-                    onPointerDown={e => { e.stopPropagation(); waveRef.current = (s - 1) * 2; startNextWave(); }}
-                    className="w-7 h-7 text-[10px] font-black text-yellow-300 bg-yellow-400/20 border border-yellow-400/40 rounded active:scale-90 touch-none"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="flex gap-1">
+              {([1, 2, 3, 4, 5] as const).map(s => (
+                <button
+                  key={s}
+                  onPointerDown={e => { e.stopPropagation(); waveRef.current = (s - 1) * 2; startNextWave(); }}
+                  className="w-7 h-7 text-[10px] font-black text-yellow-300 bg-yellow-400/20 border border-yellow-400/40 rounded active:scale-90 touch-none"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
             <button
               onPointerDown={e => { e.stopPropagation(); const next = !godModeRef.current; godModeRef.current = next; setGodMode(next); if (next) { integrityRef.current = 100; setIntegrity(100); } }}
               className={`text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded border touch-none ${godMode ? 'text-yellow-300 bg-yellow-400/20 border-yellow-400/40' : 'text-white/40 bg-black/40 border-white/10'}`}
@@ -7586,7 +7577,7 @@ export default function App() {
         )}
 
         {showDebugOverlay && gameState === 'PLAYING' && (
-          <div className="absolute bottom-40 right-4 pointer-events-none bg-black/65 border border-[#ffcc00]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#ffe9b3] font-mono z-30">
+          <div className="absolute bottom-[9rem] right-4 pointer-events-none bg-black/65 border border-[#ffcc00]/30 rounded px-2 py-1.5 text-[9px] leading-tight text-[#ffe9b3] font-mono z-30">
             <div className="text-[8px] text-[#ffcc00] uppercase tracking-widest mb-1">Input_Debug</div>
             <div>Mouse:{isMouseDown.current ? '1' : '0'} Touch:{isTouching.current ? '1' : '0'} Virtual:{isVirtualDragActive.current ? '1' : '0'}</div>
             <div>Sling:{isSlingshotMode.current ? '1' : '0'} Charged:{isSlingshotCharged.current ? '1' : '0'} Armed:{slingshotArmed.current ? '1' : '0'}</div>
