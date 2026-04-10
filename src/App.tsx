@@ -188,6 +188,9 @@ export default function App() {
   const godModeRef = useRef(false);
   const [godMode, setGodMode] = useState(false);
 
+  // Debug mode: enabled via ?debug=1 URL param (works in prod for device testing)
+  const debugMode = new URLSearchParams(window.location.search).get('debug') === '1';
+
   // Game state refs for the loop
   const waveRef = useRef(1);
   const invulnerableUntil = useRef(0);
@@ -1226,7 +1229,7 @@ export default function App() {
       keysPressed.current[e.code] = true;
 
       // Dev-only god mode toggle
-      if (import.meta.env.DEV && !e.repeat && e.code === 'KeyG') {
+      if ((import.meta.env.DEV || debugMode) && !e.repeat && e.code === 'KeyG') {
         const next = !godModeRef.current;
         godModeRef.current = next;
         setGodMode(next);
@@ -1236,8 +1239,8 @@ export default function App() {
         }
       }
 
-      // Dev-only stage jump: Alt+1…5  →  jump to the first wave of that stage
-      if (import.meta.env.DEV && !e.repeat && e.altKey &&
+      // Debug: Alt+1…5  →  jump to the first wave of that stage
+      if ((import.meta.env.DEV || debugMode) && !e.repeat && e.altKey &&
           ['Digit1','Digit2','Digit3','Digit4','Digit5'].includes(e.code)) {
         e.preventDefault();
         const stageNum = parseInt(e.code.replace('Digit', ''));
@@ -7499,9 +7502,33 @@ export default function App() {
         <div className="absolute inset-0 pointer-events-none z-20 shadow-[inset_0_0_100px_rgba(0,0,0,0.4)]" />
 
         {/* Dev: God Mode badge */}
-        {import.meta.env.DEV && godMode && (
+        {(import.meta.env.DEV || debugMode) && godMode && (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 px-3 py-0.5 bg-yellow-400/20 border border-yellow-400/60 rounded-full pointer-events-none">
-            <span className="text-[9px] font-black text-yellow-300 uppercase tracking-widest">★ GOD MODE [G]</span>
+            <span className="text-[9px] font-black text-yellow-300 uppercase tracking-widest">★ GOD MODE</span>
+          </div>
+        )}
+
+        {/* Debug panel — visible when ?debug=1 is in URL */}
+        {debugMode && gameState === 'PLAYING' && (
+          <div className="absolute bottom-2 right-2 z-30 flex flex-col gap-1 items-end select-none">
+            <span className="text-[7px] text-yellow-400/50 font-black uppercase tracking-widest">debug</span>
+            <div className="flex gap-1">
+              {([1, 2, 3, 4, 5] as const).map(s => (
+                <button
+                  key={s}
+                  onPointerDown={e => { e.stopPropagation(); waveRef.current = (s - 1) * 2; startNextWave(); }}
+                  className="w-7 h-7 text-[10px] font-black text-yellow-300 bg-yellow-400/20 border border-yellow-400/40 rounded active:scale-90 touch-none"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <button
+              onPointerDown={e => { e.stopPropagation(); const next = !godModeRef.current; godModeRef.current = next; setGodMode(next); if (next) { integrityRef.current = 100; setIntegrity(100); } }}
+              className={`text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded border touch-none ${godMode ? 'text-yellow-300 bg-yellow-400/20 border-yellow-400/40' : 'text-white/40 bg-black/40 border-white/10'}`}
+            >
+              GOD {godMode ? 'ON' : 'OFF'}
+            </button>
           </div>
         )}
 
