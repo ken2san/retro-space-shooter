@@ -82,7 +82,7 @@ Ship a stable, deployable build to Firebase Hosting.
 
 ---
 
-## Phase 6 — Performance Polish (Active)
+## Phase 6 — Performance Polish ✅ Completed
 
 Branch: `perf/speed-polish-2`
 
@@ -117,11 +117,10 @@ next optimization candidates.
 
 ## Current Status
 
-Active phase: **Phase 6 — Performance Polish** (near-complete)
-Branch: `perf/speed-polish-2`
+Active phase: **None — all planned phases complete**
+Branch: `main`
 Build: passing (tsc, Vite)
 Firebase: live
 
-Significant performance improvement confirmed on device (Stages 1–4 + mid-bosses).
-Final boss (Wave 10, LASER phase 3) not yet verified on device — minor frame drop possible.
-Game is at a presentable/demo-ready state.
+Game is stable and demo-ready. Significant performance improvements confirmed on device.
+No active development branch.
