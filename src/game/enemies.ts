@@ -86,8 +86,9 @@ export const buildWaveEnemies = (
 
     if (waveNum === 10) {
       // Level 5 Final Boss: The Core (Mothership)
+      // originY=150 keeps the boss in the upper-center area so lasers don't crush the player
       const boss: Enemy = {
-        ...createEnemy(CANVAS_WIDTH / 2 - 100, 80, 2),
+        ...createEnemy(CANVAS_WIDTH / 2 - 100, 150, 2),
         width: 200,
         height: 160,
         isBoss: true,

@@ -4121,6 +4121,12 @@ export default function App() {
             enemy.moveDir = (enemy.moveDir || 1) * -1;
           }
 
+          // LASER boss: gentle sinusoidal vertical float so it hovers near center
+          // rather than camping the top edge. Range: originY ±35px (~9s period).
+          if (enemy.bossType === BossType.LASER) {
+            enemy.y = enemy.originY + Math.sin(currentTime * 0.0007) * 35;
+          }
+
           // Phase logic
           if (enemy.health! < enemy.maxHealth! * 0.3) enemy.phase = 3;
           else if (enemy.health! < enemy.maxHealth! * 0.6) enemy.phase = 2;
@@ -6647,7 +6653,7 @@ export default function App() {
           const ringCount = isMinimalBossFx ? 0 : isReducedBossFx ? 1 : 2;
           for (let i = 0; i < ringCount; i++) {
             ctx.save();
-            ctx.rotate(angleOffset * (i + 1) * 0.5);
+            ctx.rotate(angleOffset * (i + 1) * 0.25); // 0.25 = half the original 0.5 — slower, less dizzying
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.ellipse(0, 0, 60 + i * 20, 30 + i * 10, 0, 0, Math.PI * 2);
