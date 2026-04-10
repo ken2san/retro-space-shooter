@@ -8186,25 +8186,21 @@ export default function App() {
                   initial={{ scale: 0, rotate: -45, opacity: 0 }}
                   animate={{ scale: 1, rotate: 0, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 220, damping: 12, delay: 0.25 }}
-                  className="relative mb-4"
+                  className="relative flex items-center justify-center mb-4"
+                  style={{ width: '96px', height: '96px' }}
                 >
-                  {/* Rotating light beams */}
+                  {/* Rotating light beams — behind trophy, contained to its own layer */}
                   <motion.div
                     animate={{ rotate: 360 }}
                     transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-                    className="absolute inset-0 -m-8 pointer-events-none"
+                    className="absolute inset-0 pointer-events-none"
                     aria-hidden="true"
                     style={{
-                      background: 'conic-gradient(transparent 0deg, rgba(255,204,0,0.18) 20deg, transparent 40deg, transparent 180deg, rgba(255,204,0,0.12) 200deg, transparent 220deg)',
+                      background: 'conic-gradient(transparent 0deg, rgba(255,204,0,0.22) 20deg, transparent 40deg, transparent 180deg, rgba(255,204,0,0.15) 200deg, transparent 220deg)',
                       borderRadius: '50%',
-                      width: '160px',
-                      height: '160px',
-                      transform: 'translate(-50%,-50%)',
-                      left: '50%',
-                      top: '50%',
                     }}
                   />
-                  <Trophy size={80} className="relative z-10 drop-shadow-[0_0_40px_rgba(255,204,0,0.9)]" style={{ color: '#ffcc00' }} />
+                  <Trophy size={52} className="relative z-10 drop-shadow-[0_0_30px_rgba(255,204,0,0.9)]" style={{ color: '#ffcc00' }} />
                 </motion.div>
 
                 {/* CONGRATULATIONS */}
