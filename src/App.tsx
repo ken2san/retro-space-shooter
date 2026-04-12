@@ -396,7 +396,18 @@ export default function App() {
 
   // Initialize stars and offscreen canvas
   useEffect(() => {
-    window.addEventListener('contextmenu', (e) => e.preventDefault());
+    const suppressNativeSelection = (e: Event) => {
+      e.preventDefault();
+    };
+
+    // On iOS Safari inside itch.io iframe, long press / double tap can still open
+    // native selection UI unless these events are actively suppressed.
+    window.addEventListener('contextmenu', suppressNativeSelection);
+    document.addEventListener('selectstart', suppressNativeSelection);
+    document.addEventListener('dragstart', suppressNativeSelection);
+    document.addEventListener('gesturestart', suppressNativeSelection as EventListener, { passive: false });
+    document.addEventListener('gesturechange', suppressNativeSelection as EventListener, { passive: false });
+    document.addEventListener('gestureend', suppressNativeSelection as EventListener, { passive: false });
 
     stars.current = Array.from({ length: isMobile ? 60 : 100 }, () => ({
       x: Math.random() * CANVAS_WIDTH,
@@ -411,6 +422,15 @@ export default function App() {
     offscreenCanvas.current.width = CANVAS_WIDTH;
     offscreenCanvas.current.height = CANVAS_HEIGHT;
     offscreenCtx.current = offscreenCanvas.current.getContext('2d');
+
+    return () => {
+      window.removeEventListener('contextmenu', suppressNativeSelection);
+      document.removeEventListener('selectstart', suppressNativeSelection);
+      document.removeEventListener('dragstart', suppressNativeSelection);
+      document.removeEventListener('gesturestart', suppressNativeSelection as EventListener);
+      document.removeEventListener('gesturechange', suppressNativeSelection as EventListener);
+      document.removeEventListener('gestureend', suppressNativeSelection as EventListener);
+    };
   }, []);
 
   useEffect(() => {
