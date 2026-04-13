@@ -35,3 +35,6 @@ Thumbs.db
 ehthumbs.db
 *.swp
 *.swo
+
+# Temporary upload artifact
+neon-defender.zip

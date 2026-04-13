@@ -298,6 +298,7 @@ export default function App() {
   const touchStartPos = useRef({ x: 0, y: 0 });
   const mouseAnchorPos = useRef<{ x: number, y: number } | null>(null);
   const currentMousePos = useRef({ x: 0, y: 0 });
+  const physicalMousePos = useRef({ x: 0, y: 0 });
   const playerStartPos = useRef({ x: 0, y: 0 });
   const isSlingshotCharged = useRef(false);
   const isSlingshotMode = useRef(false);
@@ -747,6 +748,10 @@ export default function App() {
     isSlingshotCharged.current = false;
     isVirtualDragActive.current = false;
 
+    if (document.pointerLockElement === canvasRef.current) {
+      document.exitPointerLock();
+    }
+
     mouseAnchorPos.current = null;
     slingshotArmed.current = false;
     slingshotArmedExpiry.current = 0;
@@ -843,6 +848,52 @@ export default function App() {
       dy: rawDy * curvedResistance,
       dist,
     };
+  };
+
+  const getPlayerInputCenter = () => ({
+    x: playerPos.current.x + PLAYER_WIDTH / 2,
+    y: playerPos.current.y + PLAYER_HEIGHT / 2,
+  });
+
+  const requestSlingshotPointerLock = () => {
+    if (isMobile) return;
+    const canvas = canvasRef.current;
+    if (!canvas || typeof canvas.requestPointerLock !== 'function') return;
+    if (document.pointerLockElement === canvas) return;
+    canvas.requestPointerLock();
+  };
+
+  const releaseSlingshotPointerLock = () => {
+    if (document.pointerLockElement === canvasRef.current) {
+      document.exitPointerLock();
+    }
+  };
+
+  const beginDesktopSlingshot = (effectX: number, effectY: number, enablePointerLock: boolean) => {
+    isSlingshotMode.current = true;
+    isSlingshotCharged.current = false;
+    isVirtualDragActive.current = false;
+    if (virtualDragReleaseTimer.current !== null) {
+      window.clearTimeout(virtualDragReleaseTimer.current);
+      virtualDragReleaseTimer.current = null;
+    }
+
+    const center = getPlayerInputCenter();
+    mouseAnchorPos.current = center;
+    currentMousePos.current = center;
+    playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
+    inputVel.current = { x: 0, y: 0 };
+    inputHistory.current = [{ x: center.x, y: center.y, t: Date.now() }];
+
+    if (enablePointerLock) {
+      requestSlingshotPointerLock();
+    }
+
+    audio.playSlingshot?.();
+    shake.current = Math.max(shake.current, 5);
+    createExplosion(effectX, effectY, '#00ffcc', 20);
+    timeScale.current = 0.2;
+    setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
   };
 
   const startNextWave = () => {
@@ -1389,19 +1440,7 @@ export default function App() {
       // Allow Ctrl to trigger Slingshot Mode during an active drag
       if (!e.repeat && (e.code === 'ControlLeft' || e.code === 'ControlRight') && isMouseDown.current && !isSlingshotMode.current) {
         markInputActivity();
-        isSlingshotMode.current = true;
-        // Ctrl-based anchor: treat as a real drag (not virtual) so mouseup fires instantly
-        isVirtualDragActive.current = false;
-        clearVirtualDragReleaseTimer();
-        mouseAnchorPos.current = { x: currentMousePos.current.x, y: currentMousePos.current.y };
-        playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
-        audio.playSlingshot?.();
-        shake.current = Math.max(shake.current, 5);
-        createExplosion(currentMousePos.current.x, currentMousePos.current.y, '#00ffcc', 20);
-
-        // Brief time slow/freeze for tactile feedback
-        timeScale.current = 0.2;
-        setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+        beginDesktopSlingshot(physicalMousePos.current.x, physicalMousePos.current.y, false);
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -1454,13 +1493,7 @@ export default function App() {
         inputHistory.current = [{ x, y, t: now }];
 
         if (ctrlPressed) {
-          isSlingshotMode.current = true;
-          isSlingshotCharged.current = false;
-          audio.playSlingshot?.();
-          shake.current = Math.max(shake.current, 5);
-          createExplosion(x, y, '#00ffcc', 20);
-          timeScale.current = 0.2;
-          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+          beginDesktopSlingshot(x, y, false);
         } else {
           isSlingshotMode.current = false;
           isSlingshotCharged.current = false;
@@ -1672,6 +1705,7 @@ export default function App() {
     };
 
     const handleSlingshot = () => {
+      releaseSlingshotPointerLock();
       const anchor = mouseAnchorPos.current || (isTouching.current ? { x: touchStartPos.current.x, y: touchStartPos.current.y } : null);
       if (!anchor) {
         isSlingshotMode.current = false;
@@ -1967,15 +2001,10 @@ export default function App() {
 
         // If already dragging and right-click/ctrl-click, force slingshot mode
         if (isMouseDown.current && isRightClick) {
-          isSlingshotMode.current = true;
           const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
           const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
-          mouseAnchorPos.current = { x, y };
-          audio.playSlingshot?.();
-          shake.current = Math.max(shake.current, 5);
-          createExplosion(x, y, '#00ffcc', 20);
-          timeScale.current = 0.2;
-          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+          physicalMousePos.current = { x, y };
+          beginDesktopSlingshot(x, y, true);
           return;
         }
 
@@ -1994,6 +2023,7 @@ export default function App() {
         const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
 
         currentMousePos.current = { x, y };
+        physicalMousePos.current = { x, y };
         playerStartPos.current = { x: playerPos.current.x, y: playerPos.current.y };
         inputHistory.current = [{ x, y, t: now }];
 
@@ -2002,23 +2032,9 @@ export default function App() {
         if (isArmed) {
           slingshotArmed.current = false;
           slingshotArmedPos.current = null;
-          isSlingshotMode.current = true;
-          mouseAnchorPos.current = { x, y };
-          audio.playSlingshot?.();
-          shake.current = Math.max(shake.current, 5);
-          createExplosion(x, y, '#00ffcc', 20);
-          timeScale.current = 0.2;
-          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+          beginDesktopSlingshot(x, y, true);
         } else if (isRightClick) {
-          isSlingshotMode.current = true;
-          mouseAnchorPos.current = { x, y };
-          audio.playSlingshot?.();
-          shake.current = Math.max(shake.current, 5);
-          createExplosion(x, y, '#00ffcc', 20);
-
-          // Brief time slow/freeze for tactile feedback
-          timeScale.current = 0.2;
-          setTimeout(() => { if (!isOverdriveActiveRef.current) timeScale.current = 1.0; }, 100);
+          beginDesktopSlingshot(x, y, true);
         } else {
           isSlingshotMode.current = false;
           mouseAnchorPos.current = { x, y }; // Still need anchor for relative movement
@@ -2094,12 +2110,33 @@ export default function App() {
         canvasScaleRef.current = rect.height / CANVAS_HEIGHT;
         const x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
         const y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+        const previousPhysical = { ...physicalMousePos.current };
+        physicalMousePos.current = { x, y };
 
-        currentMousePos.current = { x, y };
+        let effectiveX = x;
+        let effectiveY = y;
+
+        if (isMouseDown.current && isSlingshotMode.current && mouseAnchorPos.current && !isTouching.current) {
+          const deltaX = document.pointerLockElement === canvasRef.current
+            ? (e.movementX / rect.width) * CANVAS_WIDTH
+            : x - previousPhysical.x;
+          const deltaY = document.pointerLockElement === canvasRef.current
+            ? (e.movementY / rect.height) * CANVAS_HEIGHT
+            : y - previousPhysical.y;
+
+          currentMousePos.current = {
+            x: Math.max(0, Math.min(CANVAS_WIDTH, currentMousePos.current.x + deltaX)),
+            y: Math.max(0, Math.min(CANVAS_HEIGHT, currentMousePos.current.y + deltaY)),
+          };
+          effectiveX = currentMousePos.current.x;
+          effectiveY = currentMousePos.current.y;
+        } else {
+          currentMousePos.current = { x, y };
+        }
 
         // Track velocity for flick detection (same as touch)
         const now = Date.now();
-        inputHistory.current.push({ x, y, t: now });
+        inputHistory.current.push({ x: effectiveX, y: effectiveY, t: now });
         if (inputHistory.current.length > 5) inputHistory.current.shift();
         if (inputHistory.current.length >= 2) {
           const first = inputHistory.current[0];
@@ -2142,8 +2179,8 @@ export default function App() {
           }
 
           if (isSlingshotMode.current) {
-            const rawDx = (x - mouseAnchorPos.current.x);
-            const rawDy = (y - mouseAnchorPos.current.y);
+            const rawDx = (effectiveX - mouseAnchorPos.current.x);
+            const rawDy = (effectiveY - mouseAnchorPos.current.y);
             const curvedDisplacement = getCurvedSlingshotDisplacement(rawDx, rawDy, 0.25);
             const dist = curvedDisplacement.dist;
 
@@ -2157,8 +2194,8 @@ export default function App() {
               targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + curvedDisplacement.dy));
             }
           } else {
-            const rawDx = (x - mouseAnchorPos.current.x);
-            const rawDy = (y - mouseAnchorPos.current.y);
+            const rawDx = (effectiveX - mouseAnchorPos.current.x);
+            const rawDy = (effectiveY - mouseAnchorPos.current.y);
             targetPos.current.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, playerStartPos.current.x + rawDx));
             targetPos.current.y = Math.max(0, Math.min(CANVAS_HEIGHT - PLAYER_HEIGHT, playerStartPos.current.y + rawDy));
           }
@@ -2184,6 +2221,7 @@ export default function App() {
         slingshot: isSlingshotMode.current ? 1 : 0,
         charged: isSlingshotCharged.current ? 1 : 0,
       });
+      releaseSlingshotPointerLock();
       isVirtualDragActive.current = false;
       clearVirtualDragReleaseTimer();
       if (idleFireTimer.current !== null) { window.clearTimeout(idleFireTimer.current); idleFireTimer.current = null; }
